@@ -455,8 +455,8 @@ pub struct ProjectResult {
 /// Relations that always hold for the MODLE catalogue, whatever a saved project says.
 fn catalogue_rules(id: &str) -> (Option<&'static str>, &'static [&'static str]) {
     match id {
-        "scan-to-bim" => (Some("model-source"), &["measured-survey", "asset-capture"]),
-        "model-from-plans" | "import-bim" => (Some("model-source"), &[]),
+        // A survey or an asset capture can go on top of a scan: neither is covered by it.
+        "scan-to-bim" | "model-from-plans" | "import-bim" => (Some("model-source"), &[]),
         _ => (None, &[]),
     }
 }
@@ -474,9 +474,8 @@ pub fn apply_catalogue_rules(project: &mut Project) {
         if let Some(group) = group {
             item.exclusive_group = Some(group.to_string());
         }
-        if !covers.is_empty() {
-            item.makes_unnecessary = covers.iter().map(|id| id.to_string()).collect();
-        }
+        // Set even when empty, so a rule taken out is also gone from saved projects.
+        item.makes_unnecessary = covers.iter().map(|id| id.to_string()).collect();
     }
 
     let catalogue = project.onboarding.clone();
@@ -995,9 +994,9 @@ mod tests {
         let result = plan_project(&p);
         let band = band_of(&result, dec!(5));
 
-        // Only the scan is priced; the other two are reported as blocked.
-        assert_eq!(band.onboarding_ids, ["scan-to-bim"]);
-        assert_eq!(band.onboarding.cost_per_building, Some(dec!(4000)));
+        // The import is an alternative to the scan; the survey goes on top of it.
+        assert_eq!(band.onboarding_ids, ["scan-to-bim", "measured-survey"]);
+        assert_eq!(band.onboarding.cost_per_building, Some(dec!(5400)));
 
         let blocked: Vec<(&str, BlockedReason)> = band
             .blocked
@@ -1005,7 +1004,22 @@ mod tests {
             .map(|b| (b.id.as_str(), b.reason))
             .collect();
         assert!(blocked.contains(&("import-bim", BlockedReason::Alternative)));
-        assert!(blocked.contains(&("measured-survey", BlockedReason::Covered)));
+        assert!(blocked.iter().all(|(_, reason)| *reason == BlockedReason::Alternative));
+    }
+
+    #[test]
+    fn a_scan_saved_as_covering_the_survey_no_longer_does_once_opened() {
+        let mut p = project(ProjectTemplate::BuildingOwners);
+        for item in &mut p.onboarding {
+            if item.id == "scan-to-bim" {
+                item.makes_unnecessary = vec!["measured-survey".into(), "asset-capture".into()];
+            }
+        }
+        set_band_selection(&mut p, dec!(5), &["scan-to-bim", "measured-survey", "asset-capture"]);
+        apply_catalogue_rules(&mut p);
+
+        let band = band_of(&plan_project(&p), dec!(5)).clone();
+        assert_eq!(band.onboarding_ids, ["scan-to-bim", "measured-survey", "asset-capture"]);
     }
 
     #[test]
@@ -1026,7 +1040,7 @@ mod tests {
         apply_catalogue_rules(&mut p);
 
         let band = p.bands.iter().find(|b| b.buildings == dec!(5)).unwrap();
-        assert_eq!(band.onboarding, ["scan-to-bim"]);
+        assert_eq!(band.onboarding, ["scan-to-bim", "measured-survey"]);
     }
 
     #[test]
@@ -1275,7 +1289,6 @@ mod tests {
         let band = band_of(&result, dec!(5));
 
         assert!(result.onboarding_lines.iter().all(|l| l.id != "scan-to-bim"));
-        // Without the scan, the survey it used to cover is charged again.
         assert_eq!(band.onboarding_ids, ["measured-survey"]);
         assert!(band.blocked.is_empty());
     }
