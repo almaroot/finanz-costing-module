@@ -39,6 +39,10 @@ export function ProjectReport({
   const suggestion = project.last_suggestion;
   const plansOnly = project.template === "contractors";
   const nameById = new Map(result?.onboarding_lines.map((line) => [line.id, line.name]));
+  // Only what some scenario or plan actually charges: the catalogue's other elements aren't in any price.
+  const used = new Set([...(result?.bands ?? []), ...(result?.plans ?? [])].flatMap((x) => x.onboarding_ids));
+  const items = offered(project.onboarding).filter((item) => used.has(item.id));
+  const lines = result?.onboarding_lines.filter((line) => used.has(line.id)) ?? [];
 
   return createPortal(
     <div className="report fixed inset-0 z-50 overflow-y-auto bg-page">
@@ -127,7 +131,7 @@ export function ProjectReport({
             />
           ))}
 
-          {project.onboarding.length > 0 && (
+          {items.length > 0 && (
             <table className="mt-4 w-full text-sm">
               <thead>
                 <tr className="border-b border-line text-left text-xs text-muted">
@@ -138,7 +142,7 @@ export function ProjectReport({
                 </tr>
               </thead>
               <tbody>
-                {offered(project.onboarding).map((item) => (
+                {items.map((item) => (
                   <tr key={item.id} className="border-b border-line last:border-0">
                     <td className="py-2 pr-4 text-ink">
                       {item.name}
@@ -163,7 +167,7 @@ export function ProjectReport({
             Onboarding is billed once, apart from it.
           </p>
 
-          {result && result.onboarding_lines.length > 0 && (
+          {lines.length > 0 && (
             <table className="mt-4 w-full text-sm">
               <thead>
                 <tr className="border-b border-line text-left text-xs text-muted">
@@ -174,7 +178,7 @@ export function ProjectReport({
                 </tr>
               </thead>
               <tbody>
-                {result.onboarding_lines.map((line) => (
+                {lines.map((line) => (
                   <tr key={line.id} className="border-b border-line last:border-0">
                     <td className="py-2 pr-4 text-ink">{line.name}</td>
                     <td className="py-2 pr-4 text-right tabular-nums text-bad">{money(line.unit_cost)}</td>

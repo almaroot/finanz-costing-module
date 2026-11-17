@@ -37,7 +37,15 @@ pub fn workbook(project: &Project, result: &ProjectResult) -> Result<Vec<u8>, Xl
     // 2 · What we charge, per unit
     row += 1;
     header(costs, row, &["Onboarding element", "Category", "Billed", &format!("Cost ({cur})"), &format!("We charge ({cur})"), "Margin"], &bold)?;
-    for line in &result.onboarding_lines {
+    // Only what some scenario or plan actually charges, as in the report.
+    let used: std::collections::HashSet<&str> = result
+        .bands
+        .iter()
+        .flat_map(|b| &b.onboarding_ids)
+        .chain(result.plans.iter().flat_map(|p| &p.onboarding_ids))
+        .map(String::as_str)
+        .collect();
+    for line in result.onboarding_lines.iter().filter(|l| used.contains(l.id.as_str())) {
         row += 1;
         costs.write(row, 0, &line.name)?;
         costs.write(row, 1, &line.category)?;
