@@ -42,6 +42,7 @@ interface AppState {
   deleteProject(id: string): Promise<void>;
   /** Writes the project to Downloads; returns where it landed. */
   exportProject(id: string): Promise<string | undefined>;
+  exportExcel(id: string): Promise<string | undefined>;
   importProject(file: File): Promise<void>;
   /** Applies the change immediately; saves and recalculates with a debounce. */
   updateProject(update: (project: Project) => Project): void;
@@ -211,6 +212,15 @@ export const useApp = create<AppState>((set, get) => {
       await flushSave();
       try {
         return await api.exportProject(id);
+      } catch (e) {
+        set({ error: errorMessage(e) });
+      }
+    },
+
+    async exportExcel(id) {
+      await flushSave();
+      try {
+        return await api.exportExcel(id);
       } catch (e) {
         set({ error: errorMessage(e) });
       }

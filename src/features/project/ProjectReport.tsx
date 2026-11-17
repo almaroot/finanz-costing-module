@@ -1,9 +1,11 @@
-import { Printer, X } from "lucide-react";
-import { useEffect, type ReactNode } from "react";
+import { FileSpreadsheet, Printer, X } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Logo } from "../../components/Logo";
 import type { Project } from "../../bindings/Project";
 import type { ProjectResult } from "../../bindings/ProjectResult";
+import { api } from "../../lib/api";
+import { useApp } from "../../store";
 import { fmtDate, fmtMoney, fmtNum, fmtPct, perMonth } from "../../lib/format";
 import { BASIS_LABELS, RECURRENCE_LABELS, TEMPLATE_LABELS } from "../../lib/labels";
 import { offered } from "./shared";
@@ -31,6 +33,8 @@ export function ProjectReport({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  const exportExcel = useApp((s) => s.exportExcel);
+  const [savedTo, setSavedTo] = useState<string | null>(null);
   const money = (value: number | null | undefined) => fmtMoney(value ?? null, project.currency);
   const suggestion = project.last_suggestion;
   const plansOnly = project.template === "contractors";
@@ -43,9 +47,22 @@ export function ProjectReport({
           Report · <span className="text-ink">{project.name}</span>
         </div>
         <div className="flex items-center gap-2">
+          {savedTo && (
+            <span className="truncate text-xs text-ink-2" title={savedTo}>
+              Saved to {savedTo.split(/[\\/]/).slice(-2).join("/")}
+            </span>
+          )}
           <button
             type="button"
-            onClick={() => window.print()}
+            onClick={async () => setSavedTo((await exportExcel(project.id)) ?? null)}
+            className="inline-flex items-center gap-2 rounded-md border border-line px-3 py-1.5 text-sm text-ink-2 hover:text-ink [&_svg]:size-4"
+          >
+            <FileSpreadsheet />
+            Excel
+          </button>
+          <button
+            type="button"
+            onClick={() => void api.printPage()}
             className="inline-flex items-center gap-2 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white [&_svg]:size-4"
           >
             <Printer />

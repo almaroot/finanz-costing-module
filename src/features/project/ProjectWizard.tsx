@@ -415,6 +415,22 @@ function StepCosts({ project }: { project: Project }) {
                     />
                   ))}
                 </div>
+                {/* What this group costs for a one-building scenario: per-project lines count their quantity. */}
+                <div className="mt-4 flex justify-end gap-2 text-sm">
+                  <span className="text-ink-2">Total for one building</span>
+                  <span className="font-semibold tabular-nums text-bad">
+                    {fmtMoney(
+                      items
+                        .filter((i) => !i.removed)
+                        .reduce(
+                          (sum, i) =>
+                            sum + Math.max(i.internal_unit_cost, 0) * (i.basis === "per_project" ? Math.max(i.quantity, 0) : 1),
+                          0,
+                        ),
+                      project.currency,
+                    )}
+                  </span>
+                </div>
               </Card>
             );
           })}

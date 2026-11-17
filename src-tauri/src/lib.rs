@@ -1,5 +1,6 @@
 pub mod ai;
 mod db;
+mod excel;
 mod keys;
 mod rates;
 
@@ -70,21 +71,35 @@ fn duplicate_project(db: State<'_, Db>, id: String) -> Result<Project, String> {
     Ok(project)
 }
 
+/// Opens the system print dialog (Save as PDF lives there): `window.print()` is a no-op in the macOS webview.
+#[tauri::command]
+fn print_page(window: tauri::WebviewWindow) -> Result<(), String> {
+    window.print().map_err(|e| e.to_string())
+}
+
 /// Writes the project to the Downloads folder as a file another copy of the app can import.
 #[tauri::command]
 fn export_project(app: tauri::AppHandle, db: State<'_, Db>, id: String) -> Result<String, String> {
     let project = db.get_project(&id)?;
-    let name: String = project
-        .name
+    let data = serde_json::to_string_pretty(&project).map_err(db::err)?;
+    save_download(&app, &project.name, "finanz.json", data.as_bytes())
+}
+
+/// Writes the project, its prices and its scenarios to the Downloads folder as an Excel workbook.
+#[tauri::command]
+fn export_excel(app: tauri::AppHandle, db: State<'_, Db>, id: String) -> Result<String, String> {
+    let project = db.get_project(&id)?;
+    let data = excel::workbook(&project, &plan_project(&project)).map_err(db::err)?;
+    save_download(&app, &project.name, "xlsx", &data)
+}
+
+/// Saves `data` as `<name>.<ext>` in Downloads and returns the full path.
+fn save_download(app: &tauri::AppHandle, name: &str, ext: &str, data: &[u8]) -> Result<String, String> {
+    let name: String = name
         .chars()
         .map(|c| if c.is_alphanumeric() || c == ' ' || c == '-' { c } else { '_' })
         .collect();
-    let path = app
-        .path()
-        .download_dir()
-        .map_err(db::err)?
-        .join(format!("{}.finanz.json", name.trim()));
-    let data = serde_json::to_string_pretty(&project).map_err(db::err)?;
+    let path = app.path().download_dir().map_err(db::err)?.join(format!("{}.{ext}", name.trim()));
     std::fs::write(&path, data).map_err(db::err)?;
     Ok(path.display().to_string())
 }
@@ -224,6 +239,8 @@ pub fn run() {
             duplicate_project,
             delete_project,
             export_project,
+            print_page,
+            export_excel,
             import_project,
             plan,
             switch_template,
