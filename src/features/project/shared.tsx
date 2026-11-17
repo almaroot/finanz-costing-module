@@ -17,6 +17,11 @@ const DEFAULT_ONBOARDING = [
   "support-overhead",
 ];
 
+/** True for an element of the default package every new scenario starts with. */
+export function isDefault(id: string): boolean {
+  return DEFAULT_ONBOARDING.includes(id);
+}
+
 export function defaultSelection(catalogue: OnboardingItem[]): string[] {
   return DEFAULT_ONBOARDING.filter((id) => offered(catalogue).some((item) => item.id === id));
 }
@@ -42,30 +47,6 @@ export function toggleSelection(
     }
   }
   return [...selection.filter((id) => !ruledOut.has(id)), itemId];
-}
-
-/** Costs are red and income violet; profit is green when kept and red when lost. */
-export function Profit({
-  value,
-  money,
-  strong,
-}: {
-  value: number | null | undefined;
-  money: Money;
-  strong?: boolean;
-}) {
-  const losing = (value ?? 0) < 0;
-  return (
-    <span
-      className={clsx(
-        strong ? "text-sm font-semibold" : "text-xs font-medium",
-        losing ? "text-bad" : "text-good",
-      )}
-    >
-      {!losing && value ? "+" : ""}
-      {money(value)}
-    </span>
-  );
 }
 
 /** The folding checklist of onboarding elements a band or a plan includes. */

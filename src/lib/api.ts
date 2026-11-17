@@ -4,6 +4,7 @@ import type { AppSettings } from "../bindings/AppSettings";
 import type { Currency } from "../bindings/Currency";
 import type { ExchangeRates } from "../bindings/ExchangeRates";
 import type { Project } from "../bindings/Project";
+import type { SharedCost } from "../bindings/SharedCost";
 import type { ProjectResult } from "../bindings/ProjectResult";
 import type { ProjectSummary } from "../bindings/ProjectSummary";
 import type { ProjectTemplate } from "../bindings/ProjectTemplate";
@@ -21,6 +22,7 @@ export const api = {
   deleteProject: (id: string) => invoke<void>("delete_project", { id }),
   exportProject: (id: string) => invoke<string>("export_project", { id }),
   exportExcel: (id: string) => invoke<string>("export_excel", { id }),
+  defaultCosts: () => invoke<SharedCost[]>("default_costs"),
   printPage: () => invoke<void>("print_page"),
   importProject: (data: string) => invoke<Project>("import_project", { data }),
   plan: (project: Project) => invoke<ProjectResult>("plan", { project }),

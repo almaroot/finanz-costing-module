@@ -271,6 +271,8 @@ type NumberFieldProps = Omit<InputHTMLAttributes<HTMLInputElement>, "value" | "o
   scale?: number;
   min?: number;
   integer?: boolean;
+  /** Rounds what's shown (not what's stored) to this many decimals: 10 / 12 shows 0.83. */
+  decimals?: number;
   prefix?: string;
   suffix?: string;
   /** Marks the field: red for what something costs us, green for what it earns. */
@@ -284,13 +286,14 @@ export function NumberField({
   scale = 1,
   min,
   integer,
+  decimals = 6,
   prefix,
   suffix,
   dot,
   className,
   ...props
 }: NumberFieldProps) {
-  const toText = (v: number) => String(Math.round(v * scale * 1e6) / 1e6);
+  const toText = (v: number) => String(Math.round(v * scale * 10 ** decimals) / 10 ** decimals);
   const [text, setText] = useState(() => toText(value));
   const focused = useRef(false);
 

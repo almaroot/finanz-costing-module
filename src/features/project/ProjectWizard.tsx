@@ -11,11 +11,9 @@ import {
   RotateCcw,
   Save,
   Trash2,
-  TriangleAlert,
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
-import type { Band } from "../../bindings/Band";
-import type { BandResult } from "../../bindings/BandResult";
+import type { Currency } from "../../bindings/Currency";
 import type { OnboardingItem } from "../../bindings/OnboardingItem";
 import type { SharedCost } from "../../bindings/SharedCost";
 import type { OnboardingLine } from "../../bindings/OnboardingLine";
@@ -26,11 +24,12 @@ import type { ProjectResult } from "../../bindings/ProjectResult";
 import { Button, Callout, Card, Field, NumberField, Select, StatTile, TextArea, TextInput } from "../../components/ui";
 import { fmtDate, fmtMoney, fmtNum, fmtPct, perMonth } from "../../lib/format";
 import { BASES, BASIS_LABELS, RECURRENCES, RECURRENCE_LABELS, TEMPLATE_LABELS, TEMPLATES } from "../../lib/labels";
+import { api } from "../../lib/api";
 import { useApp, type SaveState, type Step } from "../../store";
-import { BandChart } from "./BandChart";
+import { StepScenarios } from "./ScenariosStep";
 import { StepPlans } from "./PlansStep";
 import { ProjectReport } from "./ProjectReport";
-import { defaultSelection, offered, OnboardingPicker, Profit, toggleSelection, type Money } from "./shared";
+import { offered, type Money } from "./shared";
 
 const STEPS: { value: Step; label: string }[] = [
   { value: 1, label: "Project" },
@@ -207,6 +206,15 @@ function StepProject({ project }: { project: Project }) {
 /** Step 2 — every cost exists and carries a value. What to charge is step 3;
  *  which scenario needs it is step 4. */
 function StepCosts({ project }: { project: Project }) {
+  // Original monthly price of each default service, for the reset button.
+  const [defaults, setDefaults] = useState<SharedCost[]>([]);
+  useEffect(() => {
+    void api.defaultCosts().then(setDefaults);
+  }, []);
+  const originals = new Map(defaults.map((c) => [c.id, c.monthly]));
+  const sharedMonthly = project.structure.shared
+    .filter((c) => !c.removed)
+    .reduce((sum, c) => sum + Math.max(c.monthly, 0) * Math.min(Math.max(c.share, 0), 1), 0);
   const updateProject = useApp((s) => s.updateProject);
   const structure = project.structure;
   const setStructure = (patch: Partial<Project["structure"]>) =>
@@ -351,31 +359,50 @@ function StepCosts({ project }: { project: Project }) {
             <SharedCostRow
               key={cost.id}
               cost={cost}
+              original={originals.get(cost.id)}
               currency={project.currency}
               onChange={(patch) => setShared(cost.id, patch)}
               onRemove={() => setShared(cost.id, { removed: true })}
               onRestore={() => setShared(cost.id, { removed: false })}
             />
           ))}
-          <Button
-            size="sm"
-            onClick={() =>
-              setStructure({
-                shared: [
-                  ...structure.shared,
-                  {
-                    id: crypto.randomUUID(),
-                    name: "",
-                    monthly: 0,
-                    share: 1,
-                    removed: false,
-                  },
-                ],
-              })
-            }
-          >
-            <Plus /> Add service
-          </Button>
+          {/* A default service this project doesn't have can come back; anything else is custom. */}
+          <div className="flex flex-wrap gap-2">
+            {defaults
+              .filter((d) => !structure.shared.some((c) => c.id === d.id))
+              .map((d) => (
+                <Button key={d.id} size="sm" onClick={() => setStructure({ shared: [...structure.shared, d] })}>
+                  <Plus /> {d.name}
+                </Button>
+              ))}
+            <Button
+              size="sm"
+              onClick={() =>
+                setStructure({
+                  shared: [
+                    ...structure.shared,
+                    {
+                      id: crypto.randomUUID(),
+                      name: "",
+                      monthly: 0,
+                      share: 1,
+                      removed: false,
+                    },
+                  ],
+                })
+              }
+            >
+              <Plus /> Custom service
+            </Button>
+          </div>
+          {/* What this client pays for the platform: each service's share, deleted ones left out. */}
+          <div className="flex justify-end gap-2 text-sm">
+            <span className="text-ink-2">Total client pays</span>
+            <span className="font-semibold tabular-nums text-bad">
+              {fmtMoney(sharedMonthly, project.currency)} / month
+            </span>
+            <span className="tabular-nums text-muted">· {fmtMoney(sharedMonthly * 12, project.currency)} / year</span>
+          </div>
         </div>
       </Card>
 
@@ -525,12 +552,15 @@ function CostTemplates({
 /** The share and what it comes to are two views of one number: typing either sets the other. */
 function SharedCostRow({
   cost,
+  original,
   currency,
   onChange,
   onRemove,
   onRestore,
 }: {
   cost: SharedCost;
+  /** The default's monthly price, when this row is one of the default services. */
+  original?: number;
   currency: string;
   onChange: (patch: Partial<SharedCost>) => void;
   onRemove: () => void;
@@ -548,15 +578,30 @@ function SharedCostRow({
         <Field label="Service" className="col-span-2 md:col-span-1">
           <TextInput value={cost.name} onChange={(e) => onChange({ name: e.target.value })} />
         </Field>
-        <Field label="Cost / month">
-          <NumberField
-            value={cost.monthly}
-            min={0}
-            dot="cost"
-            suffix={currency}
-            onChange={(v) => onChange({ monthly: v })}
-          />
-        </Field>
+        {/* The reset sits outside the <label>, or clicking the label would press it. */}
+        <div className="relative">
+          <Field label="Cost / month">
+            <NumberField
+              value={cost.monthly}
+              min={0}
+              decimals={2}
+              dot="cost"
+              suffix={currency}
+              onChange={(v) => onChange({ monthly: v })}
+            />
+          </Field>
+          {original !== undefined && Math.abs(original - cost.monthly) > 0.005 && (
+            <button
+              type="button"
+              title={`Back to the original price (${fmtMoney(original, currency as Currency)})`}
+              aria-label="Reset to the original price"
+              onClick={() => onChange({ monthly: original })}
+              className="absolute top-0 right-0 text-muted hover:text-accent [&_svg]:size-3.5"
+            >
+              <RotateCcw />
+            </button>
+          )}
+        </div>
         <Field label="Client pays">
           <NumberField
             value={cost.share}
@@ -570,6 +615,7 @@ function SharedCostRow({
           <NumberField
             value={cost.monthly * cost.share}
             min={0}
+            decimals={2}
             suffix={currency}
             onChange={(v) => cost.monthly > 0 && onChange({ share: Math.min(v / cost.monthly, 1) })}
           />
@@ -835,328 +881,6 @@ function PriceRow({
 }
 
 /** Step 4 — each scenario picks the onboarding it needs and how it is charged. */
-function StepScenarios({
-  project,
-  result,
-  money,
-}: {
-  project: Project;
-  result: ProjectResult | null;
-  money: Money;
-}) {
-  const updateProject = useApp((s) => s.updateProject);
-  const resultById = new Map(result?.bands.map((b) => [b.band_id, b]));
-
-  const setBand = (id: string, patch: Partial<Band>) =>
-    updateProject((p) => ({ ...p, bands: p.bands.map((b) => (b.id === id ? { ...b, ...patch } : b)) }));
-
-  const toggleOnboarding = (bandId: string, itemId: string, on: boolean) =>
-    updateProject((p) => ({
-      ...p,
-      bands: p.bands.map((band) =>
-        band.id === bandId
-          ? { ...band, onboarding: toggleSelection(p.onboarding, band.onboarding, itemId, on) }
-          : band,
-      ),
-    }));
-
-  const addBand = () =>
-    updateProject((p) => ({
-      ...p,
-      bands: [
-        ...p.bands,
-        {
-          id: crypto.randomUUID(),
-          buildings: 10,
-          price: null,
-          // A new band starts from the previous one, so you don't re-tick everything.
-          onboarding: [
-            ...(p.bands[p.bands.length - 1]?.onboarding ?? defaultSelection(p.onboarding)),
-          ],
-        },
-      ],
-    }));
-
-  return (
-    <div className="space-y-4">
-      {result && result.warnings.length > 0 && (
-        <Callout tone="warn" icon={<TriangleAlert />}>
-          <ul className="space-y-1">
-            {result.warnings.map((w) => (
-              <li key={w}>{w}</li>
-            ))}
-          </ul>
-        </Callout>
-      )}
-
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-ink-2">
-          Every scenario uses the costs from step 2 and the prices from step 3. Here you choose how many buildings it
-          prices, which onboarding it needs, and what the subscription costs.
-        </p>
-        <Button size="sm" onClick={addBand}>
-          <Plus /> Add band
-        </Button>
-      </div>
-
-      {project.bands.map((band, index) => (
-        <BandCard
-          key={band.id}
-          band={band}
-          index={index}
-          computed={resultById.get(band.id)}
-          project={project}
-          money={money}
-          onChange={(patch) => setBand(band.id, patch)}
-          onToggle={(itemId, on) => toggleOnboarding(band.id, itemId, on)}
-          onRemove={() => updateProject((p) => ({ ...p, bands: p.bands.filter((b) => b.id !== band.id) }))}
-        />
-      ))}
-
-      {result && (
-        <>
-          <Card title="Subscription: cost and price per building / month">
-            <BandChart bands={result.bands} currency={result.currency} />
-          </Card>
-          <Card
-            title="Scenario table"
-            description="You type the price per building per month; this table shows what each scenario bills and costs in a whole year, all of its buildings added up."
-          >
-            <ScenarioTable bands={result.bands} money={money} />
-          </Card>
-        </>
-      )}
-    </div>
-  );
-}
-
-function BandCard({
-  band,
-  index,
-  computed,
-  project,
-  money,
-  onChange,
-  onToggle,
-  onRemove,
-}: {
-  band: Band;
-  index: number;
-  computed: BandResult | undefined;
-  project: Project;
-  money: Money;
-  onChange: (patch: Partial<Band>) => void;
-  onToggle: (itemId: string, on: boolean) => void;
-  onRemove: () => void;
-}) {
-  const rule = band.price;
-  const mode = rule === null ? "project" : rule.type;
-  const suggested = computed?.suggested_subscription_price ?? 0;
-  const losing = (computed?.subscription.margin ?? 0) < 0;
-
-  return (
-    <Card className="p-4">
-      <div className="grid grid-cols-12 items-end gap-3">
-        <div className="col-span-2 md:col-span-1">
-          <div className="text-xs font-medium text-ink-2">Band</div>
-          <div className="flex h-9 items-center text-lg font-semibold tabular-nums text-ink">{index + 1}</div>
-        </div>
-        <Field label="Buildings" className="col-span-4 md:col-span-2">
-          <NumberField value={band.buildings} min={0} integer onChange={(v) => onChange({ buildings: v })} />
-        </Field>
-        <Field label="Charge as" className="col-span-6 md:col-span-2">
-          <Select
-            value={mode}
-            label="Charge as"
-            options={[
-              { value: "project", label: "Project markup" },
-              { value: "markup", label: "Own markup" },
-              { value: "amount", label: "Fixed price" },
-            ]}
-            onChange={(next) =>
-              onChange({
-                price:
-                  next === "project"
-                    ? null
-                    : next === "amount"
-                      ? { type: "amount", value: computed?.subscription.price_per_building ?? suggested }
-                      : { type: "markup", percent: project.subscription_markup },
-              })
-            }
-          />
-        </Field>
-        <Field
-          label={mode === "markup" ? "Markup on cost" : "Price / building / month"}
-          className="col-span-6 md:col-span-2"
-        >
-          {rule !== null && rule.type === "markup" ? (
-            <NumberField
-              value={rule.percent}
-              min={0}
-              scale={100}
-              dot="income"
-              suffix="%"
-              onChange={(v) => onChange({ price: { type: "markup", percent: v } })}
-            />
-          ) : rule !== null && rule.type === "amount" ? (
-            <NumberField
-              value={rule.value}
-              min={0}
-              scale={1 / 12}
-              dot="income"
-              suffix={project.currency}
-              onChange={(v) => onChange({ price: { type: "amount", value: v } })}
-            />
-          ) : (
-            <div className="flex h-9 items-center justify-end rounded-md border border-line bg-surface-2 px-2.5 text-sm tabular-nums text-ink-2">
-              {money(perMonth(suggested))}
-            </div>
-          )}
-        </Field>
-        <div className="col-span-6 md:col-span-4">
-          <div className="text-xs text-ink-2">Total for {fmtNum(band.buildings)} buildings</div>
-          <div className="text-sm font-semibold tabular-nums text-income">
-            {money(computed?.subscription.price)} <span className="text-xs font-normal text-muted">/ year</span>
-          </div>
-          <div className="text-xs text-muted">
-            Costs{" "}
-            <span className="text-bad">{money(perMonth(computed?.subscription.cost_per_building))}</span> per building
-            / month ·{" "}
-            <strong className={losing ? "text-bad" : "text-income"}>
-              margin {fmtPct(computed?.subscription.margin)}
-            </strong>
-          </div>
-        </div>
-        <div className="col-span-12 md:col-span-1 md:text-right">
-          <Button size="sm" variant="danger" aria-label={`Delete band ${index + 1}`} onClick={onRemove}>
-            <Trash2 />
-          </Button>
-        </div>
-      </div>
-
-      <p className="mt-1 text-xs text-muted">
-        {mode === "project" ? (
-          `Follows the project markup (${fmtPct(project.subscription_markup)})`
-        ) : (
-          <button type="button" className="text-accent hover:underline" onClick={() => onChange({ price: null })}>
-            Use the project markup ({money(suggested)})
-          </button>
-        )}
-        {" · "}
-        {computed && computed.onboarding_ids.length === 0
-          ? "No onboarding in this scenario"
-          : `Onboarding ${money(computed?.onboarding.price_per_building)} per building, billed once`}
-      </p>
-
-      {project.onboarding.length > 0 && (
-        <OnboardingPicker
-          title="Onboarding this scenario needs"
-          catalogue={offered(project.onboarding)}
-          selection={band.onboarding}
-          priced={computed?.onboarding_ids}
-          blocked={computed?.blocked}
-          summary={
-            computed && computed.onboarding_ids.length > 0
-              ? `${money(computed.onboarding.price_per_building)} per building`
-              : undefined
-          }
-          onToggle={onToggle}
-        />
-      )}
-    </Card>
-  );
-}
-
-/** A year that repeats: the subscription without the onboarding billed once. */
-function recurring(band: BandResult) {
-  return band.years.find((year) => year.year === 2) ?? band.years[0];
-}
-
-function ScenarioTable({ bands, money }: { bands: BandResult[]; money: Money }) {
-  const head = "px-4 py-2.5 text-xs font-semibold whitespace-nowrap text-ink-2";
-  const cell = "px-4 py-3.5 text-[13px] whitespace-nowrap";
-  const group = "border-l border-line";
-
-  return (
-    <div className="overflow-x-auto pb-1">
-      <div className="flex min-w-[860px] flex-col gap-4 tabular-nums">
-        {bands.map((band) => (
-          <div key={band.band_id} className="overflow-hidden rounded-xl border border-line bg-surface">
-            <div className="flex flex-wrap items-center gap-3.5 px-4 py-3">
-              <span className="text-[15px] font-bold tracking-tight text-ink">Band {band.position}</span>
-              <span className="text-[13px] text-ink-2">{fmtNum(band.buildings)} buildings</span>
-            </div>
-            <table className="w-full border-collapse">
-              <thead>
-                <tr>
-                  <th className={clsx(head, "text-center tracking-wider uppercase")} colSpan={3}>
-                    Onboarding · billed once
-                  </th>
-                  <th className={clsx(head, "text-center tracking-wider uppercase", group)} colSpan={5}>
-                    Subscription · every year
-                  </th>
-                  <th className={clsx(head, group)} />
-                </tr>
-                <tr className="border-y border-line bg-surface-2/60">
-                  <th className={clsx(head, "text-right")}>Cost</th>
-                  <th className={clsx(head, "text-right")}>Price</th>
-                  <th className={clsx(head, "text-right")}>Margin</th>
-                  <th className={clsx(head, "text-right", group)}>Cost</th>
-                  <th className={clsx(head, "text-right")}>Cost / month</th>
-                  <th className={clsx(head, "text-right")}>Price</th>
-                  <th className={clsx(head, "text-right")}>Price / month</th>
-                  <th className={clsx(head, "text-right")}>Margin</th>
-                  <th className={clsx(head, "text-right", group)}>Profit per year</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr className="text-right">
-                  <td className={clsx(cell, "text-bad")}>{money(band.onboarding.cost)}</td>
-                  <td className={clsx(cell, "text-income")}>{money(band.onboarding.price)}</td>
-                  <td className={clsx(cell, "text-ink-2")}>{fmtPct(band.onboarding.margin)}</td>
-                  <td className={clsx(cell, "text-bad", group)}>{money(band.subscription.cost)}</td>
-                  <td className={clsx(cell, "text-bad")}>{money(perMonth(band.subscription.cost))}</td>
-                  <td className={clsx(cell, "text-income")}>{money(band.subscription.price)}</td>
-                  <td className={clsx(cell, "text-income")}>{money(perMonth(band.subscription.price))}</td>
-                  <td className={clsx(cell, "text-ink-2")}>{fmtPct(band.subscription.margin)}</td>
-                  <td className={clsx(cell, group)}>
-                    <Profit value={recurring(band)?.profit} money={money} strong />
-                  </td>
-                </tr>
-              </tbody>
-              <tfoot>
-                <tr className="border-t border-line bg-surface-2/40">
-                  <td className={clsx(cell, "text-left text-ink-2")} colSpan={8}>
-                    Profit year 1, onboarding and subscription together
-                  </td>
-                  <td className={clsx(cell, "text-right", group)}>
-                    <Profit value={band.years[0]?.profit} money={money} strong />
-                  </td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-        ))}
-      </div>
-      <p className="mt-4 flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-line pt-3.5 text-xs leading-relaxed text-ink-2">
-        <span>
-          <span className="font-semibold text-bad">Red</span> is what it costs us
-        </span>
-        <span className="size-[3px] rounded-full bg-axis" />
-        <span>
-          <span className="font-semibold text-income">Violet</span> is what the client pays us
-        </span>
-        <span className="size-[3px] rounded-full bg-axis" />
-        <span>
-          <span className="font-semibold text-ink">Profit</span> is in bold, green when we keep money and red when we
-          lose it. Every figure is the total for that scenario's buildings, over a year: a price typed per building is
-          multiplied by them, and "Profit per year" is a year that repeats, without the onboarding billed once.
-        </span>
-      </p>
-    </div>
-  );
-}
-
 /** Step 5 — the market context, and what the model makes of it. */
 function StepSuggestion({
   project,

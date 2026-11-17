@@ -531,8 +531,8 @@ mod tests {
         let text = prompt(&project, &plan_project(&project));
 
         assert!(text.contains("GBP"));
-        assert!(text.contains("Server, charged at cost"));
-        assert!(text.contains("Mailgun, charged at cost"));
+        assert!(text.contains("Servers (prod + dev), charged at cost"));
+        assert!(text.contains("Proton Mail, charged at cost"));
         assert!(text.contains("Scan to BIM"));
         assert!(text.contains("Band 1 — 1 buildings"));
         assert!(text.contains("Band 3 — 50 buildings"));

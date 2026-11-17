@@ -131,13 +131,14 @@ pub fn default_shared_costs() -> Vec<SharedCost> {
         removed: false,
     };
     vec![
-        cost(SERVER, "Server", dec!(130), Decimal::ONE),
-        cost("object-storage", "Object storage", dec!(5), dec!(0.5)),
-        cost("mailgun", "Mailgun", dec!(12), dec!(0.5)),
-        cost("apple-certification", "Apple certification (paid yearly)", dec!(100), dec!(0.1)),
-        cost("iso-certification", "ISO certification (4,400 paid yearly)", dec!(4400), dec!(0.01)),
-        cost("os-api", "OS API", dec!(8), dec!(0.05)),
-        cost("backups", "Backups", dec!(16), Decimal::ONE),
+        // Paid yearly: the month is a twelfth of the year.
+        cost(SERVER, "Servers (prod + dev)", dec!(1548) / dec!(12), Decimal::ONE),
+        cost("proton-mail", "Proton Mail", dec!(1216) / dec!(12), Decimal::ONE),
+        cost("apple-developer", "Apple Developer", dec!(79) / dec!(12), Decimal::ONE),
+        cost("ico-fee", "ICO data protection fee", dec!(52) / dec!(12), Decimal::ONE),
+        cost("domain", "Domain", dec!(10) / dec!(12), Decimal::ONE),
+        cost("object-storage", "File storage (Krystal Object Storage)", dec!(60) / dec!(12), Decimal::ONE),
+        cost("os-api", "OS APIs", dec!(2) / dec!(12), Decimal::ONE),
     ]
 }
 

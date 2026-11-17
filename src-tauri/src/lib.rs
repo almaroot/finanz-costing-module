@@ -71,6 +71,12 @@ fn duplicate_project(db: State<'_, Db>, id: String) -> Result<Project, String> {
     Ok(project)
 }
 
+/// The platform costs a new project starts with, so a row can go back to its original price.
+#[tauri::command]
+fn default_costs() -> Vec<pricing_engine::SharedCost> {
+    pricing_engine::default_shared_costs()
+}
+
 /// Opens the system print dialog (Save as PDF lives there): `window.print()` is a no-op in the macOS webview.
 #[tauri::command]
 fn print_page(window: tauri::WebviewWindow) -> Result<(), String> {
@@ -240,6 +246,7 @@ pub fn run() {
             delete_project,
             export_project,
             print_page,
+            default_costs,
             export_excel,
             import_project,
             plan,
