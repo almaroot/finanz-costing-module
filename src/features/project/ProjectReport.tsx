@@ -159,11 +159,11 @@ export function ProjectReport({
         </Section>
 
         <Section title="2 · What we charge">
-          <Row label="Subscription markup" value={fmtPct(project.subscription_markup)} />
+          {plansOnly && <Row label="Subscription markup" value={fmtPct(project.subscription_markup)} />}
           <p className="mt-1 text-xs text-muted">
             {plansOnly
               ? "The subscription price per account covers its plan's share of the server and the database, its storage and downloads with that markup on top, plus its share of the shared services at cost."
-              : "The subscription price per building covers the platform and its services at cost, and the recurring services with that markup on top."}{" "}
+              : "Each scenario sets its own subscription price per building. The recurring services bill at their own price."}{" "}
             Onboarding is billed once, apart from it.
           </p>
 

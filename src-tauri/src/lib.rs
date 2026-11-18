@@ -77,6 +77,18 @@ fn default_costs() -> Vec<pricing_engine::SharedCost> {
     pricing_engine::default_shared_costs()
 }
 
+/// The onboarding catalogue a new project of this template starts with, so an element can go back to it.
+#[tauri::command]
+fn default_catalogue(template: ProjectTemplate) -> Vec<pricing_engine::OnboardingItem> {
+    template.catalogue()
+}
+
+/// Services that can be added to a project but aren't in it by default.
+#[tauri::command]
+fn optional_costs() -> Vec<pricing_engine::SharedCost> {
+    pricing_engine::optional_shared_costs()
+}
+
 /// Opens the system print dialog (Save as PDF lives there): `window.print()` is a no-op in the macOS webview.
 #[tauri::command]
 fn print_page(window: tauri::WebviewWindow) -> Result<(), String> {
@@ -247,6 +259,8 @@ pub fn run() {
             export_project,
             print_page,
             default_costs,
+            optional_costs,
+            default_catalogue,
             export_excel,
             import_project,
             plan,

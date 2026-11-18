@@ -3,6 +3,8 @@ import {
   ArrowLeft,
   ArrowRight,
   CircleAlert,
+  ChevronsDownUp,
+  ChevronsUpDown,
   CircleCheck,
   FileText,
   LoaderCircle,
@@ -21,7 +23,18 @@ import type { PriceRule } from "../../bindings/PriceRule";
 import type { Project } from "../../bindings/Project";
 import type { ProjectTemplate } from "../../bindings/ProjectTemplate";
 import type { ProjectResult } from "../../bindings/ProjectResult";
-import { Button, Callout, Card, Field, NumberField, Select, StatTile, TextArea, TextInput } from "../../components/ui";
+import {
+  Button,
+  Callout,
+  Card,
+  CollapseAll,
+  Field,
+  NumberField,
+  Select,
+  StatTile,
+  TextArea,
+  TextInput,
+} from "../../components/ui";
 import { fmtDate, fmtMoney, fmtNum, fmtPct, perMonth } from "../../lib/format";
 import { BASES, BASIS_LABELS, RECURRENCES, RECURRENCE_LABELS, TEMPLATE_LABELS, TEMPLATES } from "../../lib/labels";
 import { api } from "../../lib/api";
@@ -49,6 +62,7 @@ export function ProjectWizard() {
   const updateProject = useApp((s) => s.updateProject);
   const [reportOpen, setReportOpen] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [all, setAll] = useState({ open: false, version: 0 });
 
   if (!project) return null;
   const money: Money = (v) => fmtMoney(v ?? null, project.currency);
@@ -143,20 +157,33 @@ export function ProjectWizard() {
         </div>
       )}
 
-      <div className="pt-6">
-        {step === 1 && <StepProject project={project} />}
-        {step === 2 && <StepCosts project={project} />}
-        {step === 3 && <StepPricing project={project} result={result} money={money} />}
-        {step === 4 &&
-          (project.template === "contractors" ? (
-            <StepPlans project={project} result={result} money={money} />
-          ) : (
-            <StepScenarios project={project} result={result} money={money} />
-          ))}
-        {step === 5 && <StepSuggestion project={project} result={result} money={money} />}
-      </div>
+      {/* Steps 2 and 3 are lists of groups: open or close them all at once. */}
+      {(step === 2 || step === 3) && (
+        <div className="flex justify-end pt-4">
+          <Button size="sm" variant="ghost" onClick={() => setAll({ open: !all.open, version: all.version + 1 })}>
+            {all.open ? <ChevronsDownUp /> : <ChevronsUpDown />}
+            {all.open ? "Collapse all" : "Expand all"}
+          </Button>
+        </div>
+      )}
 
-      <footer className="mt-6 flex items-center justify-between border-t border-line pt-4">
+      <CollapseAll.Provider value={all}>
+        <div className={step === 2 || step === 3 ? "pt-2" : "pt-6"}>
+          {step === 1 && <StepProject project={project} />}
+          {step === 2 && <StepCosts project={project} />}
+          {step === 3 && <StepPricing project={project} result={result} money={money} />}
+          {step === 4 &&
+            (project.template === "contractors" ? (
+              <StepPlans project={project} result={result} money={money} />
+            ) : (
+              <StepScenarios project={project} result={result} money={money} />
+            ))}
+          {step === 5 && <StepSuggestion project={project} result={result} money={money} />}
+        </div>
+      </CollapseAll.Provider>
+
+      {/* Always in reach, however long the step. */}
+      <footer className="sticky bottom-0 z-20 -mx-8 mt-6 flex items-center justify-between border-t border-line bg-page/85 px-8 py-3 backdrop-blur">
         <Button onClick={() => setStep(Math.max(1, step - 1) as Step)} disabled={step === 1}>
           <ArrowLeft /> Back
         </Button>
@@ -208,10 +235,12 @@ function StepProject({ project }: { project: Project }) {
 function StepCosts({ project }: { project: Project }) {
   // Original monthly price of each default service, for the reset button.
   const [defaults, setDefaults] = useState<SharedCost[]>([]);
+  const [optional, setOptional] = useState<SharedCost[]>([]);
   useEffect(() => {
     void api.defaultCosts().then(setDefaults);
+    void api.optionalCosts().then(setOptional);
   }, []);
-  const originals = new Map(defaults.map((c) => [c.id, c.monthly]));
+  const originals = new Map([...defaults, ...optional].map((c) => [c.id, c.monthly]));
   const platformMonthly = project.structure.shared
     .filter((c) => !c.removed)
     .reduce((sum, c) => sum + Math.max(c.monthly, 0), 0);
@@ -249,6 +278,26 @@ function StepCosts({ project }: { project: Project }) {
 
   const categories: string[] = [];
   for (const item of project.onboarding) if (!categories.includes(item.category)) categories.push(item.category);
+  const catalogue = useDefaultCatalogue(project.template);
+  // Back to how the catalogue had them: what step 2 edits, not the prices of step 3.
+  const resetCosts = (ids: string[]) =>
+    updateProject((p) => ({
+      ...p,
+      onboarding: p.onboarding.map((i) => {
+        const d = ids.includes(i.id) ? catalogue.get(i.id) : undefined;
+        return d
+          ? {
+              ...i,
+              name: d.name,
+              basis: d.basis,
+              recurrence: d.recurrence,
+              quantity: d.quantity,
+              internal_unit_cost: d.internal_unit_cost,
+              removed: false,
+            }
+          : i;
+      }),
+    }));
 
   const usage = project.usage;
   const setUsage = (patch: Partial<Project["usage"]>) =>
@@ -336,23 +385,29 @@ function StepCosts({ project }: { project: Project }) {
 
       <Card
         title="Platform and services"
+        collapsible
+        summary={`${structure.shared.filter((c) => !c.removed).length} services · ${fmtMoney(platformMonthly, project.currency)} / month`}
         actions={
-          structure.shared.length > 0 &&
-          (structure.shared.every((c) => c.removed) ? (
-            <Button variant="primary" onClick={() => setAllShared(false)}>
-              <RotateCcw /> Restore all
-            </Button>
-          ) : (
-            <Button variant="danger" onClick={() => setAllShared(true)}>
-              <Trash2 /> Delete all
-            </Button>
-          ))
+          <div className="flex flex-wrap justify-end gap-2">
+            {defaults.length > 0 && (
+              <ConfirmButton
+                label="Use the default list"
+                question="Replace this list with the default one?"
+                onConfirm={() => setStructure({ shared: defaults })}
+              />
+            )}
+            {structure.shared.length > 0 &&
+              (structure.shared.every((c) => c.removed) ? (
+                <Button variant="primary" onClick={() => setAllShared(false)}>
+                  <RotateCcw /> Restore all
+                </Button>
+              ) : (
+                <Button variant="danger" onClick={() => setAllShared(true)}>
+                  <Trash2 /> Delete all
+                </Button>
+              ))}
+          </div>
         }
-        description={`What running the platform costs you, per month. How much of each service this client pays is set in step 3. ${
-          project.template === "contractors"
-            ? "Each plan splits it between its users."
-            : "Shared by the buildings of each scenario."
-        }`}
       >
         <div className="space-y-3">
           {structure.shared.map((cost) => (
@@ -366,12 +421,12 @@ function StepCosts({ project }: { project: Project }) {
               onRestore={() => setShared(cost.id, { removed: false })}
             />
           ))}
-          {/* A default service this project doesn't have can come back; anything else is custom. */}
+          {/* A default or optional service this project doesn't have can be added; anything else is custom. */}
           <div className="flex flex-wrap gap-2">
-            {defaults
+            {[...defaults, ...optional]
               .filter((d) => !structure.shared.some((c) => c.id === d.id))
               .map((d) => (
-                <Button key={d.id} size="sm" onClick={() => setStructure({ shared: [...structure.shared, d] })}>
+                <Button key={d.id} size="sm" onClick={() => setStructure({ shared: [...structure.shared, { ...d, removed: false }] })}>
                   <Plus /> {d.name}
                 </Button>
               ))}
@@ -395,7 +450,7 @@ function StepCosts({ project }: { project: Project }) {
               <Plus /> Custom service
             </Button>
           </div>
-          {/* What the platform costs, deleted services left out. How much of it this client pays is set in Pricing. */}
+          {/* What the platform costs, deleted services left out. How much of it is passed on to this client is set in Pricing. */}
           <div className="flex justify-end gap-2 text-sm">
             <span className="text-ink-2">Total</span>
             <span className="font-semibold tabular-nums text-bad">
@@ -414,20 +469,38 @@ function StepCosts({ project }: { project: Project }) {
           {categories.map((category) => {
             const items = project.onboarding.filter((i) => i.category === category);
             const ids = items.map((i) => i.id);
+            const active = items.filter((i) => !i.removed);
+            // What this group costs for a one-building scenario: per-project lines count their quantity.
+            const total = active.reduce(
+              (sum, i) =>
+                sum + Math.max(i.internal_unit_cost, 0) * (i.basis === "per_project" ? Math.max(i.quantity, 0) : 1),
+              0,
+            );
             return (
               <Card
                 key={category}
                 title={category}
+                collapsible
+                summary={`${active.length} of ${items.length} · ${fmtMoney(total, project.currency)} for one building`}
                 actions={
-                  items.every((i) => i.removed) ? (
-                    <Button variant="primary" onClick={() => restoreItems(ids)}>
-                      <RotateCcw /> Restore all
-                    </Button>
-                  ) : (
-                    <Button variant="danger" onClick={() => removeItems(ids)}>
-                      <Trash2 /> Delete all
-                    </Button>
-                  )
+                  <div className="flex flex-wrap justify-end gap-2">
+                    {items.some((i) => catalogue.has(i.id)) && (
+                      <ConfirmButton
+                        label="Use the default list"
+                        question="Put this group's costs back as they came?"
+                        onConfirm={() => resetCosts(ids)}
+                      />
+                    )}
+                    {items.every((i) => i.removed) ? (
+                      <Button variant="primary" onClick={() => restoreItems(ids)}>
+                        <RotateCcw /> Restore all
+                      </Button>
+                    ) : (
+                      <Button variant="danger" onClick={() => removeItems(ids)}>
+                        <Trash2 /> Delete all
+                      </Button>
+                    )}
+                  </div>
                 }
               >
                 <div className="space-y-3">
@@ -435,6 +508,7 @@ function StepCosts({ project }: { project: Project }) {
                     <CostRow
                       key={item.id}
                       item={item}
+                      original={catalogue.get(item.id)}
                       currency={project.currency}
                       onChange={(patch) => setItem(item.id, patch)}
                       onRemove={() => removeItems([item.id])}
@@ -442,21 +516,9 @@ function StepCosts({ project }: { project: Project }) {
                     />
                   ))}
                 </div>
-                {/* What this group costs for a one-building scenario: per-project lines count their quantity. */}
                 <div className="mt-4 flex justify-end gap-2 text-sm">
                   <span className="text-ink-2">Total for one building</span>
-                  <span className="font-semibold tabular-nums text-bad">
-                    {fmtMoney(
-                      items
-                        .filter((i) => !i.removed)
-                        .reduce(
-                          (sum, i) =>
-                            sum + Math.max(i.internal_unit_cost, 0) * (i.basis === "per_project" ? Math.max(i.quantity, 0) : 1),
-                          0,
-                        ),
-                      project.currency,
-                    )}
-                  </span>
+                  <span className="font-semibold tabular-nums text-bad">{fmtMoney(total, project.currency)}</span>
                 </div>
               </Card>
             );
@@ -549,6 +611,75 @@ function CostTemplates({
   );
 }
 
+/** A field with a small reset in its corner, shown only when the value differs from the original. */
+function Resettable({
+  changed,
+  title,
+  onReset,
+  children,
+  className,
+}: {
+  changed: boolean;
+  title: string;
+  onReset: () => void;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    // The reset sits outside the field's <label>, or clicking the label would press it.
+    <div className={clsx("relative", className)}>
+      {children}
+      {changed && (
+        <button
+          type="button"
+          title={title}
+          aria-label={title}
+          onClick={onReset}
+          className="absolute top-0 right-0 text-muted hover:text-accent [&_svg]:size-3.5"
+        >
+          <RotateCcw />
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** A button that asks once more before replacing what was typed. */
+function ConfirmButton({ label, question, onConfirm }: { label: string; question: string; onConfirm: () => void }) {
+  const [asking, setAsking] = useState(false);
+  return asking ? (
+    <span className="flex items-center gap-2">
+      <span className="text-xs text-ink-2">{question}</span>
+      <Button
+        variant="primary"
+        onClick={() => {
+          onConfirm();
+          setAsking(false);
+        }}
+      >
+        Replace
+      </Button>
+      <Button onClick={() => setAsking(false)}>Cancel</Button>
+    </span>
+  ) : (
+    <Button onClick={() => setAsking(true)}>
+      <RotateCcw /> {label}
+    </Button>
+  );
+}
+
+/** The onboarding catalogue a new project of this template starts with, by id. */
+function useDefaultCatalogue(template: ProjectTemplate) {
+  const [items, setItems] = useState<Map<string, OnboardingItem>>(new Map());
+  useEffect(() => {
+    void api.defaultCatalogue(template).then((list) => setItems(new Map(list.map((i) => [i.id, i]))));
+  }, [template]);
+  return items;
+}
+
+const sameRule = (a: PriceRule, b: PriceRule) =>
+  a.type === "amount" ? b.type === "amount" && a.value === b.value : b.type === "markup" && a.percent === b.percent;
+
 /** The share and what it comes to are two views of one number: typing either sets the other. */
 function SharedCostRow({
   cost,
@@ -578,8 +709,11 @@ function SharedCostRow({
         <Field label="Service" className="col-span-2 md:col-span-1">
           <TextInput value={cost.name} onChange={(e) => onChange({ name: e.target.value })} />
         </Field>
-        {/* The reset sits outside the <label>, or clicking the label would press it. */}
-        <div className="relative">
+        <Resettable
+          changed={original !== undefined && Math.abs(original - cost.monthly) > 0.005}
+          title={`Back to the original price (${fmtMoney(original ?? 0, currency as Currency)})`}
+          onReset={() => original !== undefined && onChange({ monthly: original })}
+        >
           <Field label="Cost / month">
             <NumberField
               value={cost.monthly}
@@ -590,18 +724,7 @@ function SharedCostRow({
               onChange={(v) => onChange({ monthly: v })}
             />
           </Field>
-          {original !== undefined && Math.abs(original - cost.monthly) > 0.005 && (
-            <button
-              type="button"
-              title={`Back to the original price (${fmtMoney(original, currency as Currency)})`}
-              aria-label="Reset to the original price"
-              onClick={() => onChange({ monthly: original })}
-              className="absolute top-0 right-0 text-muted hover:text-accent [&_svg]:size-3.5"
-            >
-              <RotateCcw />
-            </button>
-          )}
-        </div>
+        </Resettable>
       </div>
       <div className="col-span-2 text-right md:col-span-1">
         {cost.removed ? (
@@ -620,12 +743,15 @@ function SharedCostRow({
 
 function CostRow({
   item,
+  original,
   currency,
   onChange,
   onRemove,
   onRestore,
 }: {
   item: OnboardingItem;
+  /** The element as the default catalogue has it, when it comes from there. */
+  original?: OnboardingItem;
   currency: string;
   onChange: (patch: Partial<OnboardingItem>) => void;
   onRemove: () => void;
@@ -671,15 +797,21 @@ function CostRow({
             <NumberField value={item.quantity} min={0} onChange={(v) => onChange({ quantity: v })} />
           )}
         </Field>
-        <Field label="Internal cost">
-          <NumberField
-            value={item.internal_unit_cost}
-            min={0}
-            dot="cost"
-            suffix={currency}
-            onChange={(v) => onChange({ internal_unit_cost: v })}
-          />
-        </Field>
+        <Resettable
+          changed={original !== undefined && original.internal_unit_cost !== item.internal_unit_cost}
+          title={`Back to the original cost (${fmtMoney(original?.internal_unit_cost ?? 0, currency as Currency)})`}
+          onReset={() => original && onChange({ internal_unit_cost: original.internal_unit_cost })}
+        >
+          <Field label="Internal cost">
+            <NumberField
+              value={item.internal_unit_cost}
+              min={0}
+              dot="cost"
+              suffix={currency}
+              onChange={(v) => onChange({ internal_unit_cost: v })}
+            />
+          </Field>
+        </Resettable>
       </div>
       <div className="col-span-2 text-right md:col-span-1">
         {item.removed ? (
@@ -722,24 +854,21 @@ function StepPricing({
       structure: { ...p.structure, shared: p.structure.shared.map((c) => (c.id === id ? { ...c, share } : c)) },
     }));
 
+  const catalogue = useDefaultCatalogue(project.template);
+
   const extras = offered(project.onboarding);
   // Same cards, in the same order, as step 2.
   const categories: string[] = [];
   for (const item of extras) if (!categories.includes(item.category)) categories.push(item.category);
-  // On bands the markup only goes on the catalogue's recurring services.
-  const markupApplies = project.template === "contractors" || extras.some((item) => item.recurrence === "annual");
 
   return (
     <div className="space-y-4">
-      <Card
-        title="Platform and services"
-        description={
-          project.template === "contractors"
-            ? "The monthly price per account covers its plan's share of the server and the database and its storage and downloads with this markup on top, plus its share of the shared services at cost. You can still set the price of any plan in step 4."
-            : "The monthly price per building covers the platform and its services at cost, and the recurring services (step 2) with this markup on top. It never goes below what the subscription costs. You can still set the price of any band in step 4."
-        }
-      >
-        {markupApplies ? (
+      {/* Plans are priced with this markup; bands set theirs in step 4, so building owners don't need it here. */}
+      {project.template === "contractors" && (
+        <Card
+          title="Platform and services"
+          description="The monthly price per account covers its plan's share of the server and the database and its storage and downloads with this markup on top, plus its share of the shared services at cost. You can still set the price of any plan in step 4."
+        >
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
             <Field label="Subscription markup" hint="On top of cost: 40% on 100 bills 140">
               <NumberField
@@ -757,17 +886,15 @@ function StepPricing({
               />
             </Field>
           </div>
-        ) : (
-          <p className="text-sm text-muted">
-            No extra costs added: the subscription is charged at what the platform costs.
-          </p>
-        )}
-      </Card>
+        </Card>
+      )}
 
       {shared.length > 0 && (
         <Card
           title="What the client pays of each service"
-          description="Charged at cost, with no margin, for the share this client pays — so one client can cover most of a service and another none of it."
+          collapsible
+          summary={`${shared.length} ${shared.length === 1 ? "service" : "services"} · ${money(clientMonthly)} / month`}
+          description="Passed on at cost, with no margin, and itemized if the client asks for the detail. One client can pay most of a service and another none of it."
         >
           <div className="space-y-2">
             {shared.map((cost) => (
@@ -791,7 +918,7 @@ function StepPricing({
                     onChange={(v) => setShare(cost.id, Math.min(v, 1))}
                   />
                 </Field>
-                <Field label="Client pays / month">
+                <Field label="Client pays / month, at cost">
                   <NumberField
                     value={cost.monthly * cost.share}
                     min={0}
@@ -803,7 +930,7 @@ function StepPricing({
               </div>
             ))}
             <div className="flex justify-end gap-2 pt-2 text-sm">
-              <span className="text-ink-2">Total client pays</span>
+              <span className="text-ink-2">Total client pays, at cost</span>
               <span className="font-semibold tabular-nums text-bad">{money(clientMonthly)} / month</span>
               <span className="tabular-nums text-muted">· {money(clientMonthly * 12)} / year</span>
             </div>
@@ -817,28 +944,42 @@ function StepPricing({
         </Card>
       ) : (
         <>
-          <p className="text-sm text-ink-2">
-            What to charge for each onboarding cost, billed apart from the subscription. Put a markup on the cost or
-            type a fixed price — the Spine unit costs 2,000 and sells at 5,000.
-          </p>
-          {categories.map((category) => (
-            <Card key={category} title={category}>
-              <div className="space-y-2">
-                {extras
-                  .filter((item) => item.category === category)
-                  .map((item) => (
+          {categories.map((category) => {
+            const items = extras.filter((item) => item.category === category);
+            // For a one-building scenario, as in Costs: per-project lines count their quantity.
+            const units = (item: OnboardingItem) => (item.basis === "per_project" ? Math.max(item.quantity, 0) : 1);
+            const sells = items.reduce((sum, item) => sum + (lineById.get(item.id)?.unit_price ?? 0) * units(item), 0);
+            const costs = items.reduce((sum, item) => sum + (lineById.get(item.id)?.unit_cost ?? 0) * units(item), 0);
+            return (
+              <Card
+                key={category}
+                title={category}
+                collapsible
+                summary={`${items.length} ${items.length === 1 ? "element" : "elements"} · sells at ${money(sells)} for one building`}
+              >
+                <div className="space-y-2">
+                  {items.map((item) => (
                     <PriceRow
                       key={item.id}
                       item={item}
                       line={lineById.get(item.id)}
+                      original={catalogue.get(item.id)?.price}
                       currency={project.currency}
                       money={money}
                       onChange={(price) => setPrice(item.id, price)}
                     />
                   ))}
-              </div>
-            </Card>
-          ))}
+                  <div className="flex flex-wrap justify-end gap-x-2 pt-2 text-sm">
+                    <span className="text-ink-2">Total for one building</span>
+                    <span className="font-semibold tabular-nums text-income">{money(sells)}</span>
+                    <span className="tabular-nums text-muted">
+                      · cost {money(costs)} · margin {sells > 0 ? fmtPct((sells - costs) / sells) : "—"}
+                    </span>
+                  </div>
+                </div>
+              </Card>
+            );
+          })}
         </>
       )}
     </div>
@@ -848,12 +989,15 @@ function StepPricing({
 function PriceRow({
   item,
   line,
+  original,
   currency,
   money,
   onChange,
 }: {
   item: OnboardingItem;
   line: OnboardingLine | undefined;
+  /** The price rule the default catalogue gives it, when it comes from there. */
+  original?: PriceRule;
   currency: string;
   money: Money;
   onChange: (price: PriceRule) => void;
@@ -883,32 +1027,44 @@ function PriceRow({
           onChange={(next) =>
             onChange(
               next === "amount"
-                ? { type: "amount", value: line?.unit_price ?? item.internal_unit_cost }
+                ? {
+                    type: "amount",
+                    value: line?.unit_price ?? item.internal_unit_cost,
+                  }
                 : { type: "markup", percent: 0.6 },
             )
           }
         />
       </Field>
-      <Field label={isAmount ? "Price per unit" : "Markup"} className="col-span-6 md:col-span-2">
-        {rule.type === "amount" ? (
-          <NumberField
-            value={rule.value}
-            min={0}
-            dot="income"
-            suffix={currency}
-            onChange={(v) => onChange({ type: "amount", value: v })}
-          />
-        ) : (
-          <NumberField
-            value={rule.percent}
-            min={0}
-            scale={100}
-            dot="income"
-            suffix="%"
-            onChange={(v) => onChange({ type: "markup", percent: v })}
-          />
-        )}
-      </Field>
+      <Resettable
+        changed={original !== undefined && !sameRule(original, rule)}
+        title={`Back to the original price (${
+          original?.type === "amount" ? money(original.value) : `${fmtPct(original?.percent ?? 0)} markup`
+        })`}
+        onReset={() => original && onChange(original)}
+        className="col-span-6 md:col-span-2"
+      >
+        <Field label={isAmount ? "Price per unit" : "Markup"}>
+          {rule.type === "amount" ? (
+            <NumberField
+              value={rule.value}
+              min={0}
+              dot="income"
+              suffix={currency}
+              onChange={(v) => onChange({ type: "amount", value: v })}
+            />
+          ) : (
+            <NumberField
+              value={rule.percent}
+              min={0}
+              scale={100}
+              dot="income"
+              suffix="%"
+              onChange={(v) => onChange({ type: "markup", percent: v })}
+            />
+          )}
+        </Field>
+      </Resettable>
       <div className="col-span-12 text-xs text-ink-2 md:col-span-3 md:text-right">
         Sells at <strong className={belowCost ? "text-bad" : "text-ink"}>{money(line?.unit_price)}</strong>
         <span className="text-muted"> · margin {fmtPct(line?.margin)}</span>
@@ -919,15 +1075,7 @@ function PriceRow({
 
 /** Step 4 — each scenario picks the onboarding it needs and how it is charged. */
 /** Step 5 — the market context, and what the model makes of it. */
-function StepSuggestion({
-  project,
-  result,
-  money,
-}: {
-  project: Project;
-  result: ProjectResult | null;
-  money: Money;
-}) {
+function StepSuggestion({ project, result, money }: { project: Project; result: ProjectResult | null; money: Money }) {
   const updateProject = useApp((s) => s.updateProject);
   const apiKeySet = useApp((s) => s.apiKeySet);
   const settings = useApp((s) => s.settings);
@@ -1070,8 +1218,8 @@ function StepSuggestion({
               </>
             )}
             <p className="mt-4 text-xs text-muted">
-              {suggestion.model} · {fmtDate(suggestion.created_at)}. A suggestion, not a decision: check it against
-              your own markups in step 4.
+              {suggestion.model} · {fmtDate(suggestion.created_at)}. A suggestion, not a decision: check it against your
+              own markups in step 4.
             </p>
           </Card>
 

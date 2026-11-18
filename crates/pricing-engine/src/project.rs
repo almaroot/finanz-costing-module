@@ -122,23 +122,35 @@ pub struct SharedCost {
 /// Id of the server row, which projects saved with a separate server cost fill in.
 pub const SERVER: &str = "server";
 
+fn shared_cost(id: &str, name: &str, monthly: Decimal) -> SharedCost {
+    SharedCost { id: id.into(), name: name.into(), monthly, share: Decimal::ONE, removed: false }
+}
+
+/// Ex VAT. What is paid yearly counts a twelfth of it each month.
+fn yearly(amount: Decimal) -> Decimal {
+    amount / dec!(12)
+}
+
 pub fn default_shared_costs() -> Vec<SharedCost> {
-    let cost = |id: &str, name: &str, monthly: Decimal, share: Decimal| SharedCost {
-        id: id.into(),
-        name: name.into(),
-        monthly,
-        share,
-        removed: false,
-    };
     vec![
-        // Paid yearly: the month is a twelfth of the year.
-        cost(SERVER, "Servers (prod + dev)", dec!(1548) / dec!(12), Decimal::ONE),
-        cost("proton-mail", "Proton Mail", dec!(1216) / dec!(12), Decimal::ONE),
-        cost("apple-developer", "Apple Developer", dec!(79) / dec!(12), Decimal::ONE),
-        cost("ico-fee", "ICO data protection fee", dec!(52) / dec!(12), Decimal::ONE),
-        cost("domain", "Domain", dec!(10) / dec!(12), Decimal::ONE),
-        cost("object-storage", "File storage (Krystal Object Storage)", dec!(60) / dec!(12), Decimal::ONE),
-        cost("os-api", "OS APIs", dec!(2) / dec!(12), Decimal::ONE),
+        shared_cost(SERVER, "Krystal VPS, production", dec!(105)),
+        shared_cost("server-dev", "Krystal VPS, dev", dec!(24)),
+        shared_cost("object-storage", "Krystal Object Storage", dec!(5)),
+        shared_cost("apple-developer", "Apple Developer", yearly(dec!(79))),
+        shared_cost("ico-fee", "ICO data protection fee", yearly(dec!(46))),
+        shared_cost("domain", "Domain", yearly(dec!(10))),
+        // Paid per request (£0.0294): an estimate, to adjust to the real use.
+        shared_cost("os-api", "OS Places API (per use, estimate)", yearly(dec!(2))),
+    ]
+}
+
+/// Services a project leaves out unless they are added: company costs, or ones not paid yet.
+pub fn optional_shared_costs() -> Vec<SharedCost> {
+    vec![
+        // Free up to 3,000 emails a month; this is the Basic plan.
+        shared_cost("mailgun", "Mailgun", dec!(12)),
+        shared_cost("proton-mail", "Proton Mail", yearly(dec!(1216))),
+        shared_cost("iso-certification", "ISO certification", yearly(dec!(4400))),
     ]
 }
 
@@ -478,6 +490,17 @@ pub fn apply_catalogue_rules(project: &mut Project) {
         item.makes_unnecessary = covers.iter().map(|id| id.to_string()).collect();
     }
 
+    // A band of building owners always has a price you can see: one that
+    // followed the project markup is fixed at what the platform costs it.
+    if project.template == ProjectTemplate::BuildingOwners {
+        for band in &mut project.bands {
+            if band.price.is_none() {
+                let value = at_cost_per_building(&project.structure, band.buildings.max(Decimal::ZERO));
+                band.price = Some(PriceRule::Amount { value: value.unwrap_or_default() });
+            }
+        }
+    }
+
     let catalogue = project.onboarding.clone();
     let keep = |wanted: &[String]| -> Vec<String> {
         let (kept, _) = resolve(&catalogue, wanted);
@@ -489,6 +512,11 @@ pub fn apply_catalogue_rules(project: &mut Project) {
     for plan in &mut project.plans {
         plan.onboarding = keep(&plan.onboarding);
     }
+}
+
+/// What the platform costs each building of a band in a year, its share at cost.
+fn at_cost_per_building(structure: &StructureCosts, buildings: Decimal) -> Option<Decimal> {
+    div(structure.shared_monthly() * dec!(12), buildings).map(money)
 }
 
 /// Walks the catalogue in order, keeping what a band can actually hold.
@@ -553,7 +581,6 @@ pub(crate) fn resolve<'a>(
 
 /// Costs, prices and margins for every band.
 pub fn plan_project(project: &Project) -> ProjectResult {
-    let markup = project.subscription_markup.max(Decimal::ZERO);
     let mut warnings = Vec::new();
 
     match project.template {
@@ -572,7 +599,7 @@ pub fn plan_project(project: &Project) -> ProjectResult {
         .iter()
         .enumerate()
         .map(|(index, band)| {
-            plan_band(project, band, index as u32 + 1, markup)
+            plan_band(project, band, index as u32 + 1)
         })
         .collect();
 
@@ -585,7 +612,7 @@ pub fn plan_project(project: &Project) -> ProjectResult {
     ProjectResult {
         currency: project.currency,
         bands,
-        plans: plan_plans(project, markup),
+        plans: plan_plans(project, project.subscription_markup.max(Decimal::ZERO)),
         onboarding_lines,
         warnings,
     }
@@ -629,7 +656,6 @@ fn plan_band(
     project: &Project,
     band: &Band,
     position: u32,
-    markup: Decimal,
 ) -> BandResult {
     let buildings = band.buildings.max(Decimal::ZERO);
     let structure = &project.structure;
@@ -649,30 +675,22 @@ fn plan_band(
                 one_off_price += price;
             }
             Recurrence::Annual => {
+                // Each recurring service bills at its own price, on top of the subscription.
                 annual_service_cost += cost;
-                // A recurring service priced by hand bills on top of the
-                // subscription; on a margin it is covered by the subscription price.
-                if item.price.is_amount() {
-                    annual_service_price += price;
-                }
+                annual_service_price += price;
             }
         }
     }
 
-    // The platform passes through at cost; the margin is earned on the
-    // recurring services of the catalogue.
+    // The platform passes through at cost; the recurring services bill at their own price.
     let at_cost_annual = structure.shared_monthly() * dec!(12);
     let subscription_cost = at_cost_annual + annual_service_cost;
-
-    // A hand-priced recurring service already recovers its own cost, and more.
-    let to_mark_up = (annual_service_cost - annual_service_price).max(Decimal::ZERO);
-    let suggested_subscription_price =
-        div(at_cost_annual + to_mark_up * (Decimal::ONE + markup), buildings).map(money);
+    let suggested_subscription_price = at_cost_per_building(structure, buildings);
     let subscription_price_per_building = match band.price {
         None => suggested_subscription_price,
         Some(PriceRule::Amount { value }) => Some(money(value.max(Decimal::ZERO))),
         // On top of everything the subscription costs, platform included: 40%
-        // on a cost of 100 bills 140.
+        // on a cost of 100 bills 140. The recurring services' own prices count towards it.
         Some(PriceRule::Markup { percent }) => {
             let marked_up = subscription_cost * (Decimal::ONE + percent.max(Decimal::ZERO));
             div((marked_up - annual_service_price).max(Decimal::ZERO), buildings).map(money)
@@ -925,6 +943,8 @@ mod tests {
                 .map(|buildings| Band {
                     id: format!("b{buildings}"),
                     buildings: Decimal::from(buildings),
+                    // At cost, so each test sets only the price it is about.
+                    price: None,
                     ..first.clone()
                 })
                 .collect();
@@ -1081,27 +1101,33 @@ mod tests {
     }
 
     #[test]
-    fn the_markup_goes_on_the_recurring_services_not_the_platform() {
+    fn recurring_services_bill_at_their_own_price_and_the_platform_at_cost() {
         let mut p = structure_only();
-        p.subscription_markup = dec!(0.5);
+        p.subscription_markup = dec!(0.5); // building owners don't use it
         p.structure = server(dec!(1000));
         set_band_selection(&mut p, dec!(200), &["compliance-review"]);
-        let result = plan_project(&p);
-        let band = band_of(&result, dec!(200));
-
-        // (12,000 at cost + 600,000 of compliance reviews × 1.5) / 200 buildings
-        assert_eq!(band.suggested_subscription_price, Some(dec!(4560)));
-        // The profit is the markup on the reviews alone.
-        assert_eq!(band.subscription.profit, dec!(300000));
-
-        // A markup has no ceiling: 150% bills two and a half times the reviews.
-        p.subscription_markup = dec!(1.5);
         let band = band_of(&plan_project(&p), dec!(200)).clone();
-        assert_eq!(band.subscription.profit, dec!(900000));
+
+        // The platform at cost: 12,000 a year over 200 buildings.
+        assert_eq!(band.suggested_subscription_price, Some(dec!(60)));
+        // The reviews at their own 60% markup: 600,000 a year that bill 960,000.
+        assert_eq!(band.subscription.cost, dec!(612000));
+        assert_eq!(band.subscription.price, dec!(972000));
+        assert_eq!(band.subscription.profit, dec!(360000));
 
         // With nothing to earn on, the price is just what the platform costs.
-        let bare = band_of(&result, dec!(5));
+        let bare = band_of(&plan_project(&p), dec!(5)).clone();
         assert_eq!(bare.subscription.price, bare.subscription.cost);
+    }
+
+    #[test]
+    fn opening_a_band_without_a_price_fixes_it_at_what_the_platform_costs() {
+        let mut p = structure_only();
+        p.structure = server(dec!(1000));
+        apply_catalogue_rules(&mut p);
+
+        let band = p.bands.iter().find(|b| b.buildings == dec!(20)).unwrap();
+        assert_eq!(band.price, Some(PriceRule::Amount { value: dec!(600) })); // 12,000 / 20
     }
 
     #[test]

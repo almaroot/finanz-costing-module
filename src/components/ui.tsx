@@ -2,6 +2,8 @@ import clsx from "clsx";
 import { ChevronDown } from "lucide-react";
 import { createPortal } from "react-dom";
 import {
+  createContext,
+  useContext,
   useEffect,
   useRef,
   useState,
@@ -66,32 +68,70 @@ export function Page({
   );
 }
 
+/** Opens or closes every collapsible card below it at once; `version` changes on each request. */
+export const CollapseAll = createContext<{ open: boolean; version: number }>({ open: false, version: 0 });
+
 export function Card({
   title,
   description,
   actions,
+  collapsible,
+  summary,
   children,
   className,
 }: {
   title?: ReactNode;
   description?: ReactNode;
   actions?: ReactNode;
+  /** Starts closed; the title opens it. */
+  collapsible?: boolean;
+  /** Shown beside the title, so a closed card still says what it holds. */
+  summary?: ReactNode;
   children: ReactNode;
   className?: string;
 }) {
+  const [open, setOpen] = useState(!collapsible);
+  const all = useContext(CollapseAll);
+  useEffect(() => {
+    if (collapsible && all.version > 0) setOpen(all.open);
+  }, [collapsible, all]);
+  const heading = title && (
+    <span className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+      <span className="text-[17px] font-semibold tracking-tight text-ink">{title}</span>
+      {summary && <span className="text-xs text-muted tabular-nums">{summary}</span>}
+    </span>
+  );
   return (
     <section className={clsx("glass min-w-0 rounded-[18px] border border-line p-6 shadow-sm", className)}>
       {(title || actions) && (
-        <header className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <header
+          className={clsx(
+            "flex flex-wrap justify-between gap-3",
+            description && open ? "items-start" : "items-center",
+            open && "mb-4",
+          )}
+        >
           <div className="min-w-0">
-            {title && <h2 className="text-[17px] font-semibold tracking-tight text-ink">{title}</h2>}
-            {description && <p className="mt-0.5 text-xs text-ink-2">{description}</p>}
+            {collapsible ? (
+              <button
+                type="button"
+                aria-expanded={open}
+                onClick={() => setOpen(!open)}
+                className="flex items-center gap-2 text-left [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:text-muted"
+              >
+                <ChevronDown className={clsx("transition-transform", !open && "-rotate-90")} />
+                {heading}
+              </button>
+            ) : (
+              title && <h2>{heading}</h2>
+            )}
+            {description && open && <p className="mt-0.5 text-xs text-ink-2">{description}</p>}
           </div>
           {/* Pinned right, even when a long description pushes it onto its own line. */}
           {actions && <div className="ml-auto">{actions}</div>}
         </header>
       )}
-      {children}
+      {open && children}
     </section>
   );
 }

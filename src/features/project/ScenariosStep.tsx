@@ -12,7 +12,10 @@ import { fmtNum, fmtPct } from "../../lib/format";
 import { useApp } from "../../store";
 import { defaultSelection, isDefault, offered, toggleSelection, type Money } from "./shared";
 
-type Mode = "project" | "markup" | "amount";
+type Mode = "markup" | "amount";
+
+/** The subscription margin a healthy SaaS keeps; shown as a reference price, not applied. */
+const TARGET_MARGIN = 0.7;
 type Period = "month" | "year";
 
 const buildingsLabel = (n: number) => `${fmtNum(n)} ${n === 1 ? "building" : "buildings"}`;
@@ -57,7 +60,7 @@ export function StepScenarios({ project, result, money }: { project: Project; re
           {
             id: crypto.randomUUID(),
             buildings: last ? Math.max(1, last.buildings) * 2 : 1,
-            price: null,
+            price: last?.price ?? null,
             // A new band starts from the previous one, so you don't re-tick everything.
             onboarding: [...(last?.onboarding ?? defaultSelection(p.onboarding))],
           },
@@ -304,13 +307,17 @@ function BandPanel({
   onExtras: () => void;
 }) {
   const rule = band.price;
-  const mode: Mode = rule === null ? "project" : rule.type;
+  const mode: Mode = rule?.type ?? "amount";
 
   // Extras: what the band adds on top of the default package, priced for its buildings.
   const priced = new Set(computed?.onboarding_ids ?? []);
   const extras = offered(project.onboarding).filter((item) => priced.has(item.id) && !isDefault(item.id));
   const extrasPrice = extras.reduce((s, i) => s + (lines.get(i.id)?.unit_price ?? 0) * quantity(i, band.buildings), 0);
   const extrasCost = extras.reduce((s, i) => s + (lines.get(i.id)?.unit_cost ?? 0) * quantity(i, band.buildings), 0);
+
+  // ponytail: a recurring service bills on top of a fixed price, so with one the real margin comes out a bit higher.
+  const costPerBuilding = computed?.subscription.cost_per_building;
+  const target = costPerBuilding ? costPerBuilding / (1 - TARGET_MARGIN) : null;
 
   const months = period === "year" ? 1 : 1 / 12;
   const cols = computed
@@ -341,15 +348,12 @@ function BandPanel({
           <div className="flex flex-wrap items-end gap-3">
             <ChargeAs
               mode={mode}
-              markup={project.subscription_markup}
               onPick={(next) =>
                 onChange({
                   price:
-                    next === "project"
-                      ? null
-                      : next === "amount"
-                        ? { type: "amount", value: computed?.subscription.price_per_building ?? 0 }
-                        : { type: "markup", percent: rule?.type === "markup" ? rule.percent : project.subscription_markup },
+                    next === "amount"
+                      ? { type: "amount", value: computed?.subscription.price_per_building ?? 0 }
+                      : { type: "markup", percent: project.subscription_markup },
                 })
               }
             />
@@ -380,6 +384,18 @@ function BandPanel({
               />
             </label>
           </div>
+          {target !== null && (
+            <div className="text-xs text-muted">
+              For a {fmtPct(TARGET_MARGIN)} margin: <span className="tabular-nums">{money(target / 12)}</span> / month ·{" "}
+              <button
+                type="button"
+                className="text-accent hover:underline"
+                onClick={() => onChange({ price: { type: "amount", value: target } })}
+              >
+                Use it
+              </button>
+            </div>
+          )}
         </Group>
 
         {project.onboarding.length > 0 && (
@@ -518,12 +534,11 @@ function BandPanel({
   );
 }
 
-function ChargeAs({ mode, markup, onPick }: { mode: Mode; markup: number; onPick: (mode: Mode) => void }) {
+function ChargeAs({ mode, onPick }: { mode: Mode; onPick: (mode: Mode) => void }) {
   const [open, setOpen] = useState(false);
   const options: { value: Mode; label: string; desc: string }[] = [
-    { value: "project", label: "Project markup", desc: `${fmtPct(markup)} on cost, set in Pricing` },
-    { value: "markup", label: "Own markup", desc: "Your own % on cost, for this band" },
     { value: "amount", label: "Fixed price", desc: "Type the price per building" },
+    { value: "markup", label: "Own markup", desc: "A % on everything the subscription costs" },
   ];
 
   useEffect(() => {
@@ -549,7 +564,7 @@ function ChargeAs({ mode, markup, onPick }: { mode: Mode; markup: number; onPick
         )}
       >
         <span className="flex-1 text-left">
-          {mode === "project" ? `Project markup (${fmtPct(markup)})` : options.find((o) => o.value === mode)?.label}
+          {options.find((o) => o.value === mode)?.label}
         </span>
         <ChevronDown className={clsx("size-3 text-muted transition-transform", open && "rotate-180")} />
       </button>

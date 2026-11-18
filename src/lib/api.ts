@@ -3,6 +3,7 @@ import type { AiSuggestion } from "../bindings/AiSuggestion";
 import type { AppSettings } from "../bindings/AppSettings";
 import type { Currency } from "../bindings/Currency";
 import type { ExchangeRates } from "../bindings/ExchangeRates";
+import type { OnboardingItem } from "../bindings/OnboardingItem";
 import type { Project } from "../bindings/Project";
 import type { SharedCost } from "../bindings/SharedCost";
 import type { ProjectResult } from "../bindings/ProjectResult";
@@ -23,6 +24,8 @@ export const api = {
   exportProject: (id: string) => invoke<string>("export_project", { id }),
   exportExcel: (id: string) => invoke<string>("export_excel", { id }),
   defaultCosts: () => invoke<SharedCost[]>("default_costs"),
+  optionalCosts: () => invoke<SharedCost[]>("optional_costs"),
+  defaultCatalogue: (template: ProjectTemplate) => invoke<OnboardingItem[]>("default_catalogue", { template }),
   printPage: () => invoke<void>("print_page"),
   importProject: (data: string) => invoke<Project>("import_project", { data }),
   plan: (project: Project) => invoke<ProjectResult>("plan", { project }),

@@ -8,7 +8,7 @@
 
 use std::time::Duration;
 
-use pricing_engine::{AiSuggestion, BandSuggestion, Project, ProjectResult};
+use pricing_engine::{AiSuggestion, BandSuggestion, Project, ProjectResult, ProjectTemplate};
 use rust_decimal::Decimal;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -150,12 +150,14 @@ fn prompt(project: &Project, result: &ProjectResult) -> String {
     let hundred = Decimal::from(100);
     let mut out = String::new();
 
-    out.push_str(&format!(
-        "Currency: {currency}. Every figure below is in {currency}.\n\n\
-         OUR COSTS\n\
-         - Markup we put on the cost of recurring services: {}%\n",
-        project.subscription_markup * hundred,
-    ));
+    out.push_str(&format!("Currency: {currency}. Every figure below is in {currency}.\n\nOUR COSTS\n"));
+    // Only plans are priced with the project markup; each band sets its own price.
+    if project.template == ProjectTemplate::Contractors {
+        out.push_str(&format!(
+            "- Markup we put on the cost of each plan: {}%\n",
+            project.subscription_markup * hundred
+        ));
+    }
     for cost in project.structure.shared.iter().filter(|cost| !cost.removed) {
         out.push_str(&format!(
             "- {}, charged at cost: {} per month, of which this client pays {}%\n",
@@ -177,10 +179,10 @@ fn prompt(project: &Project, result: &ProjectResult) -> String {
         out.push('\n');
     }
 
-    out.push_str("VOLUME BANDS. Subscription figures are per building per MONTH; onboarding is a one-off per building. The suggested column is our own cost-plus arithmetic — treat it as correct.\n");
+    out.push_str("VOLUME BANDS. Subscription figures are per building per MONTH; onboarding is a one-off per building. The at-cost column is what the platform costs each building — treat it as correct.\n");
     for band in &result.bands {
         out.push_str(&format!(
-            "- Band {} — {} buildings: subscription costs us {} a month, cost-plus suggests {} a month, we charge {} a month today; onboarding costs {} and we charge {}\n",
+            "- Band {} — {} buildings: subscription costs us {} a month, the platform alone at cost is {} a month, we charge {} a month today; onboarding costs {} and we charge {}\n",
             band.position,
             band.buildings,
             (band.subscription.cost_per_building.unwrap_or_default() / MONTHS).round_dp(2),
@@ -531,8 +533,8 @@ mod tests {
         let text = prompt(&project, &plan_project(&project));
 
         assert!(text.contains("GBP"));
-        assert!(text.contains("Servers (prod + dev), charged at cost"));
-        assert!(text.contains("Proton Mail, charged at cost"));
+        assert!(text.contains("Krystal VPS, production, charged at cost"));
+        assert!(text.contains("Domain, charged at cost"));
         assert!(text.contains("Scan to BIM"));
         assert!(text.contains("Band 1 — 1 buildings"));
         assert!(text.contains("Band 3 — 50 buildings"));
@@ -544,7 +546,7 @@ mod tests {
     fn the_prompt_anchors_the_model_to_our_own_arithmetic() {
         let project = project();
         let text = prompt(&project, &plan_project(&project));
-        assert!(text.contains("cost-plus suggests"));
+        assert!(text.contains("the platform alone at cost is"));
         assert!(text.contains("treat it as correct"));
     }
 
