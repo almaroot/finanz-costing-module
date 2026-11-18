@@ -69,6 +69,7 @@ pub fn workbook(project: &Project, result: &ProjectResult) -> Result<Vec<u8>, Xl
             &[
                 "Scenario", "Buildings", "Quote / building / month", "Onboarding billed", "Onboarding cost",
                 "Onboarding profit", "Subscription / year", "Subscription cost", "Subscription profit",
+                "Yearly extras / year", "Yearly extras cost", "Yearly extras profit",
                 "Year 1 profit", "3-year profit", "Includes",
             ],
             &bold,
@@ -85,6 +86,7 @@ pub fn workbook(project: &Project, result: &ProjectResult) -> Result<Vec<u8>, Xl
             for (col, v) in [
                 band.onboarding.price, band.onboarding.cost, band.onboarding.profit,
                 band.subscription.price, band.subscription.cost, band.subscription.profit,
+                band.yearly_extras.price, band.yearly_extras.cost, band.yearly_extras.profit,
                 year1, band.three_year_profit,
             ]
             .into_iter()
@@ -93,7 +95,7 @@ pub fn workbook(project: &Project, result: &ProjectResult) -> Result<Vec<u8>, Xl
                 sheet.write_with_format(r, col as u16 + 3, num(v), &money)?;
             }
             let includes: Vec<_> = band.onboarding_ids.iter().map(|id| names.get(id.as_str()).copied().unwrap_or(id)).collect();
-            sheet.write(r, 11, includes.join(", "))?;
+            sheet.write(r, 14, includes.join(", "))?;
         }
         sheet.autofit();
     }

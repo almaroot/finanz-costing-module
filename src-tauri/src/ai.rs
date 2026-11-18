@@ -182,7 +182,7 @@ fn prompt(project: &Project, result: &ProjectResult) -> String {
     out.push_str("VOLUME BANDS. Subscription figures are per building per MONTH; onboarding is a one-off per building. The at-cost column is what the platform costs each building — treat it as correct.\n");
     for band in &result.bands {
         out.push_str(&format!(
-            "- Band {} — {} buildings: subscription costs us {} a month, the platform alone at cost is {} a month, we charge {} a month today; onboarding costs {} and we charge {}\n",
+            "- Band {} — {} buildings: subscription costs us {} a month, the platform alone at cost is {} a month, we charge {} a month today; onboarding costs {} and we charge {}; yearly extras, billed apart, cost {} a year and we charge {}\n",
             band.position,
             band.buildings,
             (band.subscription.cost_per_building.unwrap_or_default() / MONTHS).round_dp(2),
@@ -190,6 +190,8 @@ fn prompt(project: &Project, result: &ProjectResult) -> String {
             (band.subscription.price_per_building.unwrap_or_default() / MONTHS).round_dp(2),
             band.onboarding.cost_per_building.unwrap_or_default(),
             band.onboarding.price_per_building.unwrap_or_default(),
+            band.yearly_extras.cost_per_building.unwrap_or_default(),
+            band.yearly_extras.price_per_building.unwrap_or_default(),
         ));
     }
 

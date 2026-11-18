@@ -6,10 +6,15 @@ import type { PriceRule } from "./PriceRule";
  */
 export type Band = { id: string, buildings: number, 
 /**
- * How this band's subscription is charged. `None` follows the project markup;
- * a `Markup` of its own goes on the band's whole subscription cost.
+ * How this band's subscription is charged. `None` bills it at cost;
+ * a `Markup` goes on what the subscription costs.
  */
 price: PriceRule | null, 
+/**
+ * 0..1 off the subscription price, after the rule: 10% of 200 bills 180.
+ * Not on the onboarding or the yearly extras.
+ */
+discount: number, 
 /**
  * Ids of the onboarding elements this scenario includes.
  */

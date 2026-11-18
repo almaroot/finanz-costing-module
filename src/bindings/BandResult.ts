@@ -21,11 +21,15 @@ blocked: Array<BlockedItem>,
  */
 onboarding: StreamResult, 
 /**
- * Billed every year.
+ * The platform, billed every year.
  */
 subscription: StreamResult, 
 /**
- * Subscription price per building that would hit the target margin.
+ * Recurring services of the catalogue, billed every year apart from the subscription.
+ */
+yearly_extras: StreamResult, 
+/**
+ * Subscription price per building at what the platform costs.
  */
 suggested_subscription_price: number | null, 
 /**

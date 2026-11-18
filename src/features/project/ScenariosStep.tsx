@@ -13,9 +13,6 @@ import { useApp } from "../../store";
 import { defaultSelection, isDefault, offered, toggleSelection, type Money } from "./shared";
 
 type Mode = "markup" | "amount";
-
-/** The subscription margin a healthy SaaS keeps; shown as a reference price, not applied. */
-const TARGET_MARGIN = 0.7;
 type Period = "month" | "year";
 
 const buildingsLabel = (n: number) => `${fmtNum(n)} ${n === 1 ? "building" : "buildings"}`;
@@ -61,6 +58,7 @@ export function StepScenarios({ project, result, money }: { project: Project; re
             id: crypto.randomUUID(),
             buildings: last ? Math.max(1, last.buildings) * 2 : 1,
             price: last?.price ?? null,
+            discount: last?.discount ?? 0,
             // A new band starts from the previous one, so you don't re-tick everything.
             onboarding: [...(last?.onboarding ?? defaultSelection(p.onboarding))],
           },
@@ -108,7 +106,7 @@ export function StepScenarios({ project, result, money }: { project: Project; re
           <div className="mt-5 rounded-[14px] border border-line bg-surface px-5 pt-[18px] pb-4">
             <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
               <div className="text-[15px] font-semibold text-ink">All scenarios · year 1</div>
-              <div className="text-xs text-muted">Onboarding plus 12 months of subscription. Pick one to see its detail below.</div>
+              <div className="text-xs text-muted">Onboarding plus 12 months of subscription and yearly extras. Pick one to see its detail below.</div>
             </div>
             <div className="mt-3 flex flex-col gap-1 tabular-nums">
               {bands.map((b, i) => {
@@ -312,20 +310,27 @@ function BandPanel({
   // Extras: what the band adds on top of the default package, priced for its buildings.
   const priced = new Set(computed?.onboarding_ids ?? []);
   const extras = offered(project.onboarding).filter((item) => priced.has(item.id) && !isDefault(item.id));
-  const extrasPrice = extras.reduce((s, i) => s + (lines.get(i.id)?.unit_price ?? 0) * quantity(i, band.buildings), 0);
-  const extrasCost = extras.reduce((s, i) => s + (lines.get(i.id)?.unit_cost ?? 0) * quantity(i, band.buildings), 0);
-
-  // ponytail: a recurring service bills on top of a fixed price, so with one the real margin comes out a bit higher.
-  const costPerBuilding = computed?.subscription.cost_per_building;
-  const target = costPerBuilding ? costPerBuilding / (1 - TARGET_MARGIN) : null;
+  // Only the one-off extras are part of the onboarding; the yearly ones have their own column.
+  const oneOff = extras.filter((i) => i.recurrence === "one_off");
+  const extrasPrice = oneOff.reduce((s, i) => s + (lines.get(i.id)?.unit_price ?? 0) * quantity(i, band.buildings), 0);
+  const extrasCost = oneOff.reduce((s, i) => s + (lines.get(i.id)?.unit_cost ?? 0) * quantity(i, band.buildings), 0);
 
   const months = period === "year" ? 1 : 1 / 12;
+  // Its own column whenever the catalogue has a yearly service, picked by this band or not.
+  const yearlyNames = offered(project.onboarding)
+    .filter((i) => i.recurrence === "annual")
+    .map((i) => i.name);
+  const yearly = yearlyNames.length > 0;
   const cols = computed
     ? [
         { price: computed.onboarding.price, cost: computed.onboarding.cost },
         { price: computed.subscription.price * months, cost: computed.subscription.cost * months },
+        ...(yearly ? [{ price: computed.yearly_extras.price * months, cost: computed.yearly_extras.cost * months }] : []),
       ]
     : [];
+  const grid = yearly
+    ? "grid-cols-[minmax(110px,.7fr)_repeat(3,minmax(170px,1fr))]"
+    : "grid-cols-[minmax(110px,.7fr)_repeat(2,minmax(200px,1fr))]";
   const margin = (price: number, cost: number) => (price <= 0 ? "—" : `${fmtPct((price - cost) / price)} margin`);
 
   return (
@@ -383,19 +388,19 @@ function BandPanel({
                 onChange={(v) => onChange({ price: { type: "amount", value: v } })}
               />
             </label>
+            <label className="flex flex-col gap-[5px]">
+              <span className="text-xs font-medium text-ink-2">Discount</span>
+              <NumberField
+                className="w-20"
+                value={band.discount}
+                min={0}
+                scale={100}
+                decimals={2}
+                suffix="%"
+                onChange={(v) => onChange({ discount: Math.min(v, 1) })}
+              />
+            </label>
           </div>
-          {target !== null && (
-            <div className="text-xs text-muted">
-              For a {fmtPct(TARGET_MARGIN)} margin: <span className="tabular-nums">{money(target / 12)}</span> / month ·{" "}
-              <button
-                type="button"
-                className="text-accent hover:underline"
-                onClick={() => onChange({ price: { type: "amount", value: target } })}
-              >
-                Use it
-              </button>
-            </div>
-          )}
         </Group>
 
         {project.onboarding.length > 0 && (
@@ -427,6 +432,11 @@ function BandPanel({
                 className="inline-flex max-w-full items-center gap-1 rounded-full border border-accent/20 bg-accent-soft py-0.5 pr-0.5 pl-[9px] text-xs font-medium text-accent-ink"
               >
                 <span className="min-w-0 truncate">{item.name}</span>
+                {item.recurrence === "annual" && (
+                  <span className="shrink-0 rounded-full bg-accent/10 px-1.5 text-[10px] font-semibold tracking-wide uppercase">
+                    yearly
+                  </span>
+                )}
                 <button
                   type="button"
                   aria-label={`Remove ${item.name}`}
@@ -443,8 +453,8 @@ function BandPanel({
 
       {computed && (
         <div className="overflow-x-auto">
-          <div className="min-w-[520px] tabular-nums">
-            <div className="grid grid-cols-[minmax(110px,.7fr)_repeat(2,minmax(200px,1fr))] border-y border-line bg-surface-2/50">
+          <div className={clsx("tabular-nums", yearly ? "min-w-[640px]" : "min-w-[520px]")}>
+            <div className={clsx("grid border-y border-line bg-surface-2/50", grid)}>
               <div />
               <div className="px-5 py-2.5 text-right">
                 <div className="text-xs font-semibold text-ink">Onboarding</div>
@@ -470,6 +480,16 @@ function BandPanel({
                   ))}
                 </div>
               </div>
+              {yearly && (
+                <div className="border-l border-line px-5 py-2.5 text-right">
+                  <div className="text-xs font-semibold text-ink">
+                    {yearlyNames.length === 1 ? yearlyNames[0] : "Yearly extras"}
+                  </div>
+                  <div className="mt-px text-[11px] text-muted">
+                    {computed.yearly_extras.cost > 0 ? `billed apart, per ${period}` : "not in this band · Add extras"}
+                  </div>
+                </div>
+              )}
             </div>
 
             {(
@@ -482,7 +502,8 @@ function BandPanel({
               <div
                 key={row.label}
                 className={clsx(
-                  "grid grid-cols-[minmax(110px,.7fr)_repeat(2,minmax(200px,1fr))] items-start",
+                  "grid items-start",
+                  grid,
                   r === 1 && "border-t border-line/60",
                   r === 2 && "border-t border-ink/15",
                 )}
@@ -494,7 +515,7 @@ function BandPanel({
                 {cols.map((c, j) => {
                   const v = row.value(c);
                   return (
-                    <div key={j} className={clsx("px-5 py-3 text-right whitespace-nowrap", j === 1 && "border-l border-line")}>
+                    <div key={j} className={clsx("px-5 py-3 text-right whitespace-nowrap", j > 0 && "border-l border-line")}>
                       <div
                         className={clsx(
                           r === 2 ? clsx("text-base font-bold", tone(v)) : "text-sm",
@@ -506,9 +527,15 @@ function BandPanel({
                       </div>
                       {r === 2 ? (
                         <div className="mt-0.5 text-xs text-muted">{margin(c.price, c.cost)}</div>
+                      ) : r === 0 && j === 1 && band.discount > 0 && band.discount < 1 ? (
+                        // The price before the discount, so both are in view.
+                        <div className="mt-0.5 text-xs text-muted">
+                          List price <span className="text-ink-2">{money(c.price / (1 - band.discount))}</span> ·{" "}
+                          {fmtPct(band.discount)} off
+                        </div>
                       ) : (
                         j === 0 &&
-                        extras.length > 0 && (
+                        oneOff.length > 0 && (
                           <div className="mt-0.5 text-xs text-muted">incl. {money(row.extra)} in extras</div>
                         )
                       )}
@@ -524,7 +551,9 @@ function BandPanel({
       <div className="flex flex-wrap items-center gap-3 rounded-b-[13px] border-t border-line bg-surface-2/40 px-5 py-3.5">
         <div className="min-w-0 flex-[1_1_260px]">
           <div className="text-sm font-semibold text-ink">Profit year 1</div>
-          <div className="mt-0.5 text-xs text-muted">Onboarding plus 12 months of subscription</div>
+          <div className="mt-0.5 text-xs text-muted">
+            Onboarding plus 12 months of subscription{yearly ? " and the yearly extras" : ""}
+          </div>
         </div>
         <div className={clsx("text-[22px] font-bold tracking-tight whitespace-nowrap tabular-nums", tone(computed?.years[0]?.profit ?? 0))}>
           <Signed value={computed?.years[0]?.profit} money={money} />
@@ -649,7 +678,7 @@ function ExtrasModal({
           <div className="min-w-0 flex-1">
             <div className="text-[19px] font-semibold tracking-tight text-ink">Extra services</div>
             <div className="mt-1 text-[13px] text-muted">
-              Band {index + 1} · {buildingsLabel(n)}. Billed once, on top of the subscription.
+              Band {index + 1} · {buildingsLabel(n)}. Billed once, or every year when marked so, apart from the subscription.
             </div>
           </div>
           <button
@@ -711,8 +740,8 @@ function ExtrasModal({
                         </span>
                         <span className="min-w-0">
                           <span className={clsx("block text-sm", off ? "text-muted" : "text-ink")}>{item.name}</span>
-                          {(reason || isDefault(item.id)) && (
-                            <span className="mt-0.5 block text-xs text-muted">{reason ?? "In the default package"}</span>
+                          {(reason || isDefault(item.id) || item.recurrence === "annual") && (
+                            <span className="mt-0.5 block text-xs text-muted">{reason ?? (item.recurrence === "annual" ? "Billed every year" : "In the default package")}</span>
                           )}
                         </span>
                         <span className="text-right whitespace-nowrap">

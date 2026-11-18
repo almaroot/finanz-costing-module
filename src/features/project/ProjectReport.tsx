@@ -38,6 +38,7 @@ export function ProjectReport({
   const money = (value: number | null | undefined) => fmtMoney(value ?? null, project.currency);
   const suggestion = project.last_suggestion;
   const plansOnly = project.template === "contractors";
+  const yearlyExtras = result?.bands.some((b) => b.yearly_extras.price > 0 || b.yearly_extras.cost > 0) ?? false;
   const nameById = new Map(result?.onboarding_lines.map((line) => [line.id, line.name]));
   // Only what some scenario or plan actually charges: the catalogue's other elements aren't in any price.
   const used = new Set([...(result?.bands ?? []), ...(result?.plans ?? [])].flatMap((x) => x.onboarding_ids));
@@ -309,6 +310,12 @@ export function ProjectReport({
                     Subscription
                     <span className="block font-normal">every year</span>
                   </th>
+                  {yearlyExtras && (
+                    <th className="py-2 pr-4 font-medium">
+                      Yearly extras
+                      <span className="block font-normal">every year</span>
+                    </th>
+                  )}
                   <th className="py-2 font-medium">
                     Profit
                     <span className="block font-normal">per year</span>
@@ -334,11 +341,17 @@ export function ProjectReport({
                         {money(band.subscription.price)}
                         <span className="block text-xs text-bad">costs {money(band.subscription.cost)}</span>
                       </td>
+                      {yearlyExtras && (
+                        <td className="py-2.5 pr-4 text-income">
+                          {money(band.yearly_extras.price)}
+                          <span className="block text-xs text-bad">costs {money(band.yearly_extras.cost)}</span>
+                        </td>
+                      )}
                       <td className="py-2.5">
                         <span className={losing ? "font-semibold text-bad" : "font-semibold text-good"}>
                           {money(recurring?.profit)}
                         </span>
-                        <span className="block text-xs text-muted">margin {fmtPct(band.subscription.margin)}</span>
+                        <span className="block text-xs text-muted">margin {fmtPct(recurring?.margin)}</span>
                       </td>
                     </tr>
                   );

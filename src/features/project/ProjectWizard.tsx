@@ -463,9 +463,6 @@ function StepCosts({ project }: { project: Project }) {
 
       {project.onboarding.length > 0 && (
         <>
-          <p className="text-sm text-ink-2">
-            Onboarding costs. Every element has a cost here — each scenario in step 4 picks the ones it needs.
-          </p>
           {categories.map((category) => {
             const items = project.onboarding.filter((i) => i.category === category);
             const ids = items.map((i) => i.id);

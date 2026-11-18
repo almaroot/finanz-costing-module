@@ -264,10 +264,15 @@ pub struct Band {
     pub id: String,
     #[ts(type = "number")]
     pub buildings: Decimal,
-    /// How this band's subscription is charged. `None` follows the project markup;
-    /// a `Markup` of its own goes on the band's whole subscription cost.
+    /// How this band's subscription is charged. `None` bills it at cost;
+    /// a `Markup` goes on what the subscription costs.
     #[serde(default)]
     pub price: Option<PriceRule>,
+    /// 0..1 off the subscription price, after the rule: 10% of 200 bills 180.
+    /// Not on the onboarding or the yearly extras.
+    #[ts(type = "number")]
+    #[serde(default)]
+    pub discount: Decimal,
     /// Ids of the onboarding elements this scenario includes.
     #[serde(default)]
     pub onboarding: Vec<String>,
@@ -433,9 +438,11 @@ pub struct BandResult {
     pub blocked: Vec<BlockedItem>,
     /// Billed once, separately from the subscription.
     pub onboarding: StreamResult,
-    /// Billed every year.
+    /// The platform, billed every year.
     pub subscription: StreamResult,
-    /// Subscription price per building that would hit the target margin.
+    /// Recurring services of the catalogue, billed every year apart from the subscription.
+    pub yearly_extras: StreamResult,
+    /// Subscription price per building at what the platform costs.
     #[ts(type = "number | null")]
     pub suggested_subscription_price: Option<Decimal>,
     /// Years 1, 2 and 3.
@@ -675,35 +682,34 @@ fn plan_band(
                 one_off_price += price;
             }
             Recurrence::Annual => {
-                // Each recurring service bills at its own price, on top of the subscription.
+                // A yearly extra: billed every year at its own price, apart from the subscription.
                 annual_service_cost += cost;
                 annual_service_price += price;
             }
         }
     }
 
-    // The platform passes through at cost; the recurring services bill at their own price.
-    let at_cost_annual = structure.shared_monthly() * dec!(12);
-    let subscription_cost = at_cost_annual + annual_service_cost;
+    // The subscription is the platform alone, at the share this client pays.
+    let subscription_cost = structure.shared_monthly() * dec!(12);
     let suggested_subscription_price = at_cost_per_building(structure, buildings);
     let subscription_price_per_building = match band.price {
         None => suggested_subscription_price,
         Some(PriceRule::Amount { value }) => Some(money(value.max(Decimal::ZERO))),
-        // On top of everything the subscription costs, platform included: 40%
-        // on a cost of 100 bills 140. The recurring services' own prices count towards it.
+        // On top of what the subscription costs: 40% on a cost of 100 bills 140.
         Some(PriceRule::Markup { percent }) => {
-            let marked_up = subscription_cost * (Decimal::ONE + percent.max(Decimal::ZERO));
-            div((marked_up - annual_service_price).max(Decimal::ZERO), buildings).map(money)
+            div(subscription_cost * (Decimal::ONE + percent.max(Decimal::ZERO)), buildings).map(money)
         }
     };
-    // Whatever the band says, the subscription never bills less than it costs.
-    let subscription_price = (subscription_price_per_building.unwrap_or_default() * buildings + annual_service_price)
-        .max(subscription_cost);
+    // The rule never bills less than the subscription costs; a discount, being asked for, can.
+    let discount = Decimal::ONE - band.discount.clamp(Decimal::ZERO, Decimal::ONE);
+    let subscription_price =
+        money((subscription_price_per_building.unwrap_or_default() * buildings).max(subscription_cost) * discount);
 
     let onboarding = stream(one_off_cost, one_off_price, buildings);
     let subscription = stream(subscription_cost, subscription_price, buildings);
+    let yearly_extras = stream(annual_service_cost, annual_service_price, buildings);
 
-    // Year 1 pays the onboarding on top; years 2 and 3 are the subscription again.
+    // Year 1 pays the onboarding on top; every year pays the subscription and the yearly extras.
     let year = |year: u32, price: Decimal, cost: Decimal, profit: Decimal| YearResult {
         year,
         price: money(price),
@@ -714,15 +720,12 @@ fn plan_band(
         profit_per_building: div(profit, buildings).map(money),
         margin: div(profit, price).map(ratio),
     };
+    let every_year = |s: &StreamResult, e: &StreamResult| (s.price + e.price, s.cost + e.cost, s.profit + e.profit);
+    let (price, cost, profit) = every_year(&subscription, &yearly_extras);
     let years = vec![
-        year(
-            1,
-            onboarding.price + subscription.price,
-            onboarding.cost + subscription.cost,
-            onboarding.profit + subscription.profit,
-        ),
-        year(2, subscription.price, subscription.cost, subscription.profit),
-        year(3, subscription.price, subscription.cost, subscription.profit),
+        year(1, onboarding.price + price, onboarding.cost + cost, onboarding.profit + profit),
+        year(2, price, cost, profit),
+        year(3, price, cost, profit),
     ];
     let three_year_price: Decimal = years.iter().map(|y| y.price).sum();
     let three_year_profit: Decimal = years.iter().map(|y| y.profit).sum();
@@ -742,6 +745,7 @@ fn plan_band(
         years,
         onboarding,
         subscription,
+        yearly_extras,
     }
 }
 
@@ -850,6 +854,7 @@ pub fn default_bands(template: ProjectTemplate) -> Vec<Band> {
         id: id.into(),
         buildings,
         price: None,
+        discount: Decimal::ZERO,
         onboarding: selection.clone(),
     };
     vec![band("b1", dec!(1)), band("b2", dec!(5)), band("b3", dec!(50))]
@@ -1101,23 +1106,46 @@ mod tests {
     }
 
     #[test]
-    fn recurring_services_bill_at_their_own_price_and_the_platform_at_cost() {
+    fn yearly_extras_bill_apart_from_the_subscription() {
         let mut p = structure_only();
-        p.subscription_markup = dec!(0.5); // building owners don't use it
         p.structure = server(dec!(1000));
         set_band_selection(&mut p, dec!(200), &["compliance-review"]);
         let band = band_of(&plan_project(&p), dec!(200)).clone();
 
-        // The platform at cost: 12,000 a year over 200 buildings.
-        assert_eq!(band.suggested_subscription_price, Some(dec!(60)));
+        // The subscription is the platform alone: 12,000 a year, at cost.
+        assert_eq!(band.subscription.cost, dec!(12000));
+        assert_eq!(band.subscription.price, dec!(12000));
         // The reviews at their own 60% markup: 600,000 a year that bill 960,000.
-        assert_eq!(band.subscription.cost, dec!(612000));
-        assert_eq!(band.subscription.price, dec!(972000));
-        assert_eq!(band.subscription.profit, dec!(360000));
+        assert_eq!(band.yearly_extras.cost, dec!(600000));
+        assert_eq!(band.yearly_extras.price, dec!(960000));
+        // Every year pays both; year 1 adds the onboarding, here none.
+        assert_eq!(band.years[1].price, dec!(972000));
+        assert_eq!(band.years[1].profit, dec!(360000));
+    }
 
-        // With nothing to earn on, the price is just what the platform costs.
-        let bare = band_of(&plan_project(&p), dec!(5)).clone();
-        assert_eq!(bare.subscription.price, bare.subscription.cost);
+    #[test]
+    fn a_discount_comes_off_the_subscription_alone() {
+        let mut p = structure_only();
+        p.structure = server(dec!(100)); // 1,200 a year
+        set_band_selection(&mut p, dec!(5), &["scan-to-bim", "compliance-review"]);
+        for band in &mut p.bands {
+            band.price = Some(PriceRule::Amount { value: dec!(600) }); // 3,000 a year for 5
+        }
+        let before = band_of(&plan_project(&p), dec!(5)).clone();
+        for band in &mut p.bands {
+            band.discount = dec!(0.1);
+        }
+        let after = band_of(&plan_project(&p), dec!(5)).clone();
+
+        assert_eq!(after.subscription.price, dec!(2700));
+        assert_eq!(after.onboarding.price, before.onboarding.price);
+        assert_eq!(after.yearly_extras.price, before.yearly_extras.price);
+
+        // Asked for, it can take the subscription below what it costs.
+        for band in &mut p.bands {
+            band.discount = dec!(0.9);
+        }
+        assert_eq!(band_of(&plan_project(&p), dec!(5)).subscription.price, dec!(300));
     }
 
     #[test]
@@ -1284,7 +1312,7 @@ mod tests {
     }
 
     #[test]
-    fn a_recurring_service_with_a_fixed_price_bills_on_top_of_the_subscription() {
+    fn a_recurring_service_with_a_fixed_price_bills_as_a_yearly_extra() {
         let mut p = project(ProjectTemplate::BuildingOwners);
         // Enough fixed cost that the subscription still has something to recover.
         p.structure = server(dec!(800));
@@ -1297,8 +1325,9 @@ mod tests {
         let result = plan_project(&p);
         let band = band_of(&result, dec!(5));
 
-        assert_eq!(band.subscription.cost, dec!(9600) + dec!(15000));
-        assert!(band.subscription.price > dec!(24000));
+        assert_eq!(band.subscription.cost, dec!(9600));
+        assert_eq!(band.yearly_extras.cost, dec!(15000));
+        assert_eq!(band.yearly_extras.price, dec!(24000)); // 4,800 × 5 buildings
         assert_eq!(band.onboarding.price, Decimal::ZERO);
     }
 
