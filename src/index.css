@@ -157,8 +157,10 @@ body,
     --bad: #c62f2f;
   }
 
+  /* An A4 sheet, the size a UK client prints and files. */
   @page {
-    margin: 16mm;
+    size: A4;
+    margin: 14mm 14mm 16mm;
   }
 
   html,
@@ -190,8 +192,52 @@ body,
     padding: 0 !important;
   }
 
-  .report-section {
-    break-inside: avoid;
+  /* Costs, pricing and scenarios each start a page of their own; a part longer
+     than a page runs on to the next one rather than leaving a gap before it. */
+  .report-page {
+    break-before: page;
+  }
+
+  /* Denser than on screen, so each part fits its A4 page. */
+  .report-sheet {
+    font-size: 10.5px;
+  }
+
+  .report-sheet h1 {
+    font-size: 18px;
+  }
+
+  .report-sheet header {
+    margin-bottom: 14px !important;
+    padding-bottom: 8px !important;
+  }
+
+  .report-sheet .report-section {
+    margin-bottom: 0 !important;
+  }
+
+  .report-sheet table {
+    font-size: 10px;
+  }
+
+  .report-sheet th {
+    font-size: 9px;
+  }
+
+  .report-sheet th,
+  .report-sheet td {
+    padding-top: 3px !important;
+    padding-bottom: 3px !important;
+  }
+
+  .report-sheet h2 + p,
+  .report-sheet li {
+    font-size: 10px;
+  }
+
+  /* A caption stays with the table it names. */
+  .report-sheet h3 {
+    break-after: avoid;
   }
 
   tr {

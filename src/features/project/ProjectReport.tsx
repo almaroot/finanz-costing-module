@@ -1,3 +1,4 @@
+import clsx from "clsx";
 import { FileSpreadsheet, Printer, X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -7,7 +8,7 @@ import type { ProjectResult } from "../../bindings/ProjectResult";
 import { api } from "../../lib/api";
 import { useApp } from "../../store";
 import { fmtDate, fmtMoney, fmtNum, fmtPct, perMonth } from "../../lib/format";
-import { BASIS_LABELS, RECURRENCE_LABELS, TEMPLATE_LABELS } from "../../lib/labels";
+import { BASIS_LABELS, TEMPLATE_LABELS } from "../../lib/labels";
 import { offered } from "./shared";
 
 /**
@@ -38,6 +39,9 @@ export function ProjectReport({
   const money = (value: number | null | undefined) => fmtMoney(value ?? null, project.currency);
   const suggestion = project.last_suggestion;
   const plansOnly = project.template === "contractors";
+  const platform = project.structure.shared.filter((cost) => !cost.removed);
+  const platformMonthly = platform.reduce((sum, cost) => sum + cost.monthly, 0);
+  const clientMonthly = platform.reduce((sum, cost) => sum + cost.monthly * cost.share, 0);
   const yearlyExtras = result?.bands.some((b) => b.yearly_extras.price > 0 || b.yearly_extras.cost > 0) ?? false;
   const nameById = new Map(result?.onboarding_lines.map((line) => [line.id, line.name]));
   // Only what some scenario or plan actually charges: the catalogue's other elements aren't in any price.
@@ -97,8 +101,11 @@ export function ProjectReport({
           {project.notes.trim() && <p className="mt-3 text-sm text-ink-2">{project.notes}</p>}
         </header>
 
-        <Section title="1 · What it costs us">
-          {plansOnly ? (
+        <Section
+          title="1 · What it costs us"
+          intro="What we pay to run the platform, and what each onboarding service costs us, before any margin."
+        >
+          {plansOnly && (
             <>
               <Row label="Platform per account" value={`${money(project.usage.per_account_monthly)} / month`} />
               <Row
@@ -123,80 +130,68 @@ export function ProjectReport({
                 />
               ))}
             </>
-          ) : null}
-          {project.structure.shared.filter((cost) => !cost.removed).map((cost) => (
-            <Row
-              key={cost.id}
-              label={`${cost.name}, at cost`}
-              value={`${money(cost.monthly * cost.share)} / month · ${fmtPct(cost.share)} of ${money(cost.monthly)}`}
+          )}
+
+          {platform.length > 0 && (
+            <Table
+              caption="Platform"
+              head={["Service", "Per month", "Per year"]}
+              rows={platform.map((cost) => [cost.name, money(cost.monthly), money(cost.monthly * 12)])}
+              total={["Total", money(platformMonthly), money(platformMonthly * 12)]}
             />
-          ))}
+          )}
 
           {items.length > 0 && (
-            <table className="mt-4 w-full text-sm">
-              <thead>
-                <tr className="border-b border-line text-left text-xs text-muted">
-                  <th className="py-2 pr-4 font-medium">Onboarding element</th>
-                  <th className="py-2 pr-4 font-medium">Billed</th>
-                  <th className="py-2 pr-4 font-medium">Charged per</th>
-                  <th className="py-2 text-right font-medium">Cost</th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((item) => (
-                  <tr key={item.id} className="border-b border-line last:border-0">
-                    <td className="py-2 pr-4 text-ink">
-                      {item.name}
-                      <span className="block text-xs text-muted">{item.category}</span>
-                    </td>
-                    <td className="py-2 pr-4 text-ink-2">{RECURRENCE_LABELS[item.recurrence]}</td>
-                    <td className="py-2 pr-4 text-ink-2">{BASIS_LABELS[item.basis]}</td>
-                    <td className="py-2 text-right tabular-nums text-bad">{money(item.internal_unit_cost)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <Table
+              caption="Onboarding"
+              head={["Service", "Billed", "Counted per", "Cost"]}
+              rows={items.map((item) => [
+                item.name,
+                item.recurrence === "one_off" ? "Once" : "Every year",
+                BASIS_LABELS[item.basis],
+                money(item.internal_unit_cost),
+              ])}
+            />
           )}
         </Section>
 
-        <Section title="2 · What we charge">
+        <Section
+          page
+          title="2 · What we charge"
+          intro={
+            plansOnly
+              ? "Each plan's subscription covers its share of the platform with a markup on top. Onboarding is billed once, apart from it."
+              : "The platform is passed on at cost, for the share this client pays. Each onboarding service has its own price. The subscription price per building is set per scenario, on the next page."
+          }
+        >
           {plansOnly && <Row label="Subscription markup" value={fmtPct(project.subscription_markup)} />}
-          <p className="mt-1 text-xs text-muted">
-            {plansOnly
-              ? "The subscription price per account covers its plan's share of the server and the database, its storage and downloads with that markup on top, plus its share of the shared services at cost."
-              : "Each scenario sets its own subscription price per building. The recurring services bill at their own price."}{" "}
-            Onboarding is billed once, apart from it.
-          </p>
+
+          {platform.length > 0 && (
+            <Table
+              caption="Platform passed on to the client, at cost"
+              head={["Service", "Client pays", "Per month"]}
+              rows={platform.map((cost) => [cost.name, fmtPct(cost.share), money(cost.monthly * cost.share)])}
+              total={["Total", "", money(clientMonthly)]}
+            />
+          )}
 
           {lines.length > 0 && (
-            <table className="mt-4 w-full text-sm">
-              <thead>
-                <tr className="border-b border-line text-left text-xs text-muted">
-                  <th className="py-2 pr-4 font-medium">Element</th>
-                  <th className="py-2 pr-4 text-right font-medium">Cost</th>
-                  <th className="py-2 pr-4 text-right font-medium">We charge</th>
-                  <th className="py-2 text-right font-medium">Margin</th>
-                </tr>
-              </thead>
-              <tbody>
-                {lines.map((line) => (
-                  <tr key={line.id} className="border-b border-line last:border-0">
-                    <td className="py-2 pr-4 text-ink">{line.name}</td>
-                    <td className="py-2 pr-4 text-right tabular-nums text-bad">{money(line.unit_cost)}</td>
-                    <td className="py-2 pr-4 text-right tabular-nums font-medium text-income">
-                      {money(line.unit_price)}
-                      {line.manual_price && <span className="ml-1 text-xs font-normal text-muted">fixed</span>}
-                    </td>
-                    <td className="py-2 text-right tabular-nums text-ink-2">{fmtPct(line.margin)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <Table
+              caption="Onboarding prices"
+              head={["Service", "Cost", "We charge", "Profit", "Margin"]}
+              rows={lines.map((line) => [
+                line.name,
+                money(line.unit_cost),
+                money(line.unit_price),
+                money(line.unit_price - line.unit_cost),
+                fmtPct(line.margin),
+              ])}
+            />
           )}
         </Section>
 
         {result && plansOnly && (
-          <Section title="3 · Plans">
+          <Section page title="3 · Plans">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-line text-right text-xs text-muted">
@@ -292,76 +287,35 @@ export function ProjectReport({
         )}
 
         {result && !plansOnly && (
-          <Section title="3 · Scenarios">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-line text-right text-xs text-muted">
-                  <th className="py-2 pr-4 text-left font-medium">Scenario</th>
-                  <th className="py-2 pr-4 font-medium">Buildings</th>
-                  <th className="py-2 pr-4 font-medium">
-                    Quote
-                    <span className="block font-normal">per building / month</span>
-                  </th>
-                  <th className="py-2 pr-4 font-medium">
-                    Onboarding
-                    <span className="block font-normal">billed once</span>
-                  </th>
-                  <th className="py-2 pr-4 font-medium">
-                    Subscription
-                    <span className="block font-normal">every year</span>
-                  </th>
-                  {yearlyExtras && (
-                    <th className="py-2 pr-4 font-medium">
-                      Yearly extras
-                      <span className="block font-normal">every year</span>
-                    </th>
-                  )}
-                  <th className="py-2 font-medium">
-                    Profit
-                    <span className="block font-normal">per year</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="text-right tabular-nums">
-                {result.bands.map((band) => {
-                  const recurring = band.years.find((year) => year.year === 2) ?? band.years[0];
-                  const losing = (recurring?.profit ?? 0) < 0;
-                  return (
-                    <tr key={band.band_id} className="border-b border-line last:border-0">
-                      <td className="py-2.5 pr-4 text-left font-medium text-ink">Band {band.position}</td>
-                      <td className="py-2.5 pr-4 text-ink-2">{fmtNum(band.buildings)}</td>
-                      <td className="py-2.5 pr-4 font-medium text-income">
-                        {money(perMonth(band.subscription.price_per_building))}
-                      </td>
-                      <td className="py-2.5 pr-4 text-income">
-                        {money(band.onboarding.price)}
-                        <span className="block text-xs text-bad">costs {money(band.onboarding.cost)}</span>
-                      </td>
-                      <td className="py-2.5 pr-4 text-income">
-                        {money(band.subscription.price)}
-                        <span className="block text-xs text-bad">costs {money(band.subscription.cost)}</span>
-                      </td>
-                      {yearlyExtras && (
-                        <td className="py-2.5 pr-4 text-income">
-                          {money(band.yearly_extras.price)}
-                          <span className="block text-xs text-bad">costs {money(band.yearly_extras.cost)}</span>
-                        </td>
-                      )}
-                      <td className="py-2.5">
-                        <span className={losing ? "font-semibold text-bad" : "font-semibold text-good"}>
-                          {money(recurring?.profit)}
-                        </span>
-                        <span className="block text-xs text-muted">margin {fmtPct(recurring?.margin)}</span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            <p className="mt-3 text-xs text-muted">
-              Onboarding and subscription are totals for that scenario's buildings, over a whole year. The quote column
-              is the price for one building in one month, which is what the client is told.
-            </p>
+          <Section
+            page
+            title="3 · Scenarios"
+            intro="Each scenario is a number of buildings, and its amounts are for all of them. Year 1 adds the onboarding, 12 months of subscription and the yearly services."
+          >
+            <Table
+              head={[
+                "Scenario",
+                "Buildings",
+                "Price per building / month",
+                "Onboarding, once",
+                "Subscription, per year",
+                ...(yearlyExtras ? ["Yearly services, per year"] : []),
+                "Year 1 profit",
+              ]}
+              rows={result.bands.map((band) => {
+                const discount = project.bands.find((b) => b.id === band.band_id)?.discount ?? 0;
+                const year1 = band.years[0];
+                return [
+                  `Band ${band.position}`,
+                  fmtNum(band.buildings),
+                  `${money(perMonth(band.subscription.price_per_building))}${discount > 0 ? ` (${fmtPct(discount)} off)` : ""}`,
+                  money(band.onboarding.price),
+                  money(band.subscription.price),
+                  ...(yearlyExtras ? [money(band.yearly_extras.price)] : []),
+                  `${money(year1?.profit)} · ${fmtPct(year1?.margin)}`,
+                ];
+              })}
+            />
 
             <h3 className="mt-6 mb-2 text-xs font-medium text-ink-2">What each scenario includes</h3>
             <ul className="space-y-1 text-sm text-ink-2">
@@ -379,7 +333,7 @@ export function ProjectReport({
         )}
 
         {suggestion && (
-          <Section title="4 · What the AI suggests">
+          <Section page title="4 · What the AI suggests">
             <div className="mb-4 flex flex-wrap gap-8">
               <div>
                 <div className="text-xs text-muted">Subscription</div>
@@ -447,12 +401,77 @@ export function ProjectReport({
   );
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+/** One part of the report; `page` starts it on a new printed page. */
+function Section({
+  title,
+  intro,
+  page,
+  children,
+}: {
+  title: string;
+  intro?: string;
+  page?: boolean;
+  children: ReactNode;
+}) {
   return (
-    <section className="report-section mb-8">
-      <h2 className="mb-3 text-sm font-semibold tracking-wide text-ink uppercase">{title}</h2>
-      {children}
+    <section className={clsx("report-section mb-10", page && "report-page")}>
+      <h2 className="text-sm font-semibold tracking-wide text-ink uppercase">{title}</h2>
+      {intro && <p className="mt-1 text-sm text-ink-2">{intro}</p>}
+      <div className="mt-3">{children}</div>
     </section>
+  );
+}
+
+/** A plain table: text on the left, figures on the right, and an optional bold total. */
+function Table({
+  caption,
+  head,
+  rows,
+  total,
+}: {
+  caption?: string;
+  head: string[];
+  rows: string[][];
+  total?: string[];
+}) {
+  const cell = (i: number) => clsx("py-2", i < head.length - 1 && "pr-4", i > 0 && "text-right tabular-nums");
+  return (
+    <div className="mt-4 first:mt-0">
+      {caption && <h3 className="mb-1 text-xs font-medium text-ink-2">{caption}</h3>}
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-line text-xs text-muted">
+            {head.map((h, i) => (
+              <th key={h} className={clsx(cell(i), "text-left font-medium", i > 0 && "text-right")}>
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, r) => (
+            <tr key={r} className="border-b border-line last:border-0">
+              {row.map((v, i) => (
+                <td key={i} className={clsx(cell(i), i === 0 ? "text-ink" : "text-ink-2")}>
+                  {v}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+        {total && (
+          <tfoot>
+            <tr className="border-t border-ink/20 font-semibold text-ink">
+              {total.map((v, i) => (
+                <td key={i} className={cell(i)}>
+                  {v}
+                </td>
+              ))}
+            </tr>
+          </tfoot>
+        )}
+      </table>
+    </div>
   );
 }
 
