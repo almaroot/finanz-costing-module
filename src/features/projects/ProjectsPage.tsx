@@ -86,19 +86,9 @@ export function ProjectsPage() {
         <span className="text-[13px] text-muted">
           {projects.length} {projects.length === 1 ? "project" : "projects"}
         </span>
-        <label className="ml-auto inline-flex cursor-pointer items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium text-ink-2 hover:bg-surface-2 hover:text-ink [&>svg]:size-4">
+        <Button size="sm" className="ml-auto" onClick={() => void importProject()}>
           <Upload /> Import project
-          <input
-            type="file"
-            accept=".json,application/json"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              e.target.value = "";
-              if (file) void importProject(file);
-            }}
-          />
-        </label>
+        </Button>
       </div>
 
       {projects.length === 0 ? (

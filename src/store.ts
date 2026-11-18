@@ -43,7 +43,8 @@ interface AppState {
   /** Writes the project to Downloads; returns where it landed. */
   exportProject(id: string): Promise<string | undefined>;
   exportExcel(id: string): Promise<string | undefined>;
-  importProject(file: File): Promise<void>;
+  /** Asks for an exported file and adds it as a new project. */
+  importProject(): Promise<void>;
   /** Applies the change immediately; saves and recalculates with a debounce. */
   updateProject(update: (project: Project) => Project): void;
   /** Step 1: swaps the template, rebuilding the catalogue in the engine. */
@@ -228,10 +229,10 @@ export const useApp = create<AppState>((set, get) => {
       }
     },
 
-    async importProject(file) {
+    async importProject() {
       try {
-        await api.importProject(await file.text());
-        await reloadProjects();
+        // null when the dialog is cancelled: nothing to reload.
+        if (await api.importProject()) await reloadProjects();
       } catch (e) {
         set({ error: errorMessage(e) });
       }

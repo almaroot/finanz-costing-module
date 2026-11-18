@@ -138,13 +138,24 @@ fn save_as(
 }
 
 /// Adds an exported project as a new one, so importing twice never overwrites anything.
+/// Asks for an exported file and adds it as a new project; `None` when the dialog is cancelled.
+/// Async, so the dialog doesn't block the main thread.
 #[tauri::command]
-fn import_project(db: State<'_, Db>, data: String) -> Result<Project, String> {
+async fn import_project(app: tauri::AppHandle, db: State<'_, Db>) -> Result<Option<Project>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let mut dialog = app.dialog().file().add_filter("Finanz project", &["json"]);
+    if let Ok(downloads) = app.path().download_dir() {
+        dialog = dialog.set_directory(downloads);
+    }
+    let Some(picked) = dialog.blocking_pick_file() else {
+        return Ok(None);
+    };
+    let data = std::fs::read_to_string(picked.into_path().map_err(db::err)?).map_err(db::err)?;
     let mut project = db::parse_project(&data).map_err(|e| format!("Not a project file: {e}"))?;
     project.id = new_id();
     project.updated_at = now();
     db.upsert_project(&project)?;
-    Ok(project)
+    Ok(Some(project))
 }
 
 #[tauri::command]
