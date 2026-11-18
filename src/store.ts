@@ -40,11 +40,13 @@ interface AppState {
   createProject(name: string, client: string, template: ProjectTemplate): Promise<void>;
   duplicateProject(id: string): Promise<void>;
   deleteProject(id: string): Promise<void>;
+  setProjectFolder(id: string, folder: string): Promise<void>;
+  renameProject(id: string, name: string): Promise<void>;
   /** Writes the project to Downloads; returns where it landed. */
   exportProject(id: string): Promise<string | undefined>;
   exportExcel(id: string): Promise<string | undefined>;
   /** Asks for an exported file and adds it as a new project. */
-  importProject(): Promise<void>;
+  importProject(data?: string): Promise<void>;
   /** Applies the change immediately; saves and recalculates with a debounce. */
   updateProject(update: (project: Project) => Project): void;
   /** Step 1: swaps the template, rebuilding the catalogue in the engine. */
@@ -229,10 +231,35 @@ export const useApp = create<AppState>((set, get) => {
       }
     },
 
-    async importProject() {
+    async importProject(data) {
       try {
-        // null when the dialog is cancelled: nothing to reload.
-        if (await api.importProject()) await reloadProjects();
+        // With no text, asks for a file; null when the dialog is cancelled: nothing to reload.
+        if (await (data === undefined ? api.importProject() : api.importProjectData(data))) await reloadProjects();
+      } catch (e) {
+        set({ error: errorMessage(e) });
+      }
+    },
+
+    async setProjectFolder(id, folder) {
+      // The open project is saved from memory, so it must carry the folder too.
+      if (get().project?.id === id) await flushSave();
+      try {
+        await api.setProjectFolder(id, folder);
+        set((s) => ({
+          projects: s.projects.map((p) => (p.id === id ? { ...p, folder } : p)),
+          ...(s.project?.id === id ? { project: { ...s.project, folder } } : {}),
+        }));
+      } catch (e) {
+        set({ error: errorMessage(e) });
+      }
+    },
+
+    async renameProject(id, name) {
+      try {
+        // The open project is renamed in memory and saved like any other edit.
+        if (get().project?.id === id) get().updateProject((p) => ({ ...p, name }));
+        else await api.renameProject(id, name);
+        set((s) => ({ projects: s.projects.map((p) => (p.id === id ? { ...p, name } : p)) }));
       } catch (e) {
         set({ error: errorMessage(e) });
       }
@@ -247,7 +274,7 @@ export const useApp = create<AppState>((set, get) => {
         await api.deleteProject(id);
         set((s) => ({
           projects: s.projects.filter((p) => p.id !== id),
-          ...(s.project?.id === id ? { project: null, result: null } : {}),
+          ...(s.project?.id === id ? { project: null, result: null, view: "projects" as const } : {}),
         }));
       } catch (e) {
         set({ error: errorMessage(e) });

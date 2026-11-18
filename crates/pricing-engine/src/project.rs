@@ -351,6 +351,9 @@ pub struct Project {
     pub market: MarketContext,
     #[serde(default)]
     pub last_suggestion: Option<AiSuggestion>,
+    /// The sidebar folder it sits in; empty for none.
+    #[serde(default)]
+    pub folder: String,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -360,6 +363,7 @@ pub struct Project {
 pub struct ProjectSummary {
     pub id: String,
     pub name: String,
+    pub folder: String,
     pub client: String,
     pub template: ProjectTemplate,
     pub currency: Currency,
@@ -754,6 +758,7 @@ impl Project {
         ProjectSummary {
             id: self.id.clone(),
             name: self.name.clone(),
+            folder: self.folder.clone(),
             client: self.client.clone(),
             template: self.template,
             currency: self.currency,
@@ -824,6 +829,7 @@ impl Project {
             },
             market: MarketContext::default(),
             last_suggestion: None,
+            folder: String::new(),
             created_at: now.clone(),
             updated_at: now,
         };

@@ -23,4 +23,8 @@ local_model: string,
 /**
  * Platform and services lists saved by name, to import into another project.
  */
-cost_templates: Array<CostTemplate>, };
+cost_templates: Array<CostTemplate>, 
+/**
+ * Sidebar folder name → colour token (e.g. "cat-3").
+ */
+folder_colors: { [key in string]: string }, };

@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import { Copy, Download, Plus, Trash2, Upload } from "lucide-react";
+import { Copy, Download, FileUp, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import type { ProjectTemplate } from "../../bindings/ProjectTemplate";
 import { Button, Card, Field, Page, TextInput } from "../../components/ui";
@@ -17,10 +17,33 @@ export function ProjectsPage() {
   const [template, setTemplate] = useState<ProjectTemplate>("building_owners");
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [exported, setExported] = useState<{ id: string; path: string } | null>(null);
+  const [mode, setMode] = useState<"new" | "import">("new");
 
   return (
     <Page title="Projects" subtitle="Pick a template, enter the costs and the app works out the price per building.">
-      <Card title="New project" className="mb-7">
+      <Card
+        title={
+          <span className="inline-flex rounded-lg bg-surface-2 p-1 text-sm">
+            {(["new", "import"] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setMode(m)}
+                className={clsx(
+                  "rounded-md px-3.5 py-1.5 font-semibold transition-colors",
+                  mode === m ? "bg-surface text-ink shadow-sm" : "text-ink-2 hover:text-ink",
+                )}
+              >
+                {m === "new" ? "New project" : "Import"}
+              </button>
+            ))}
+          </span>
+        }
+        className="mb-7"
+      >
+        {mode === "import" ? (
+          <DropZone onFile={(data) => void importProject(data)} onBrowse={() => void importProject()} />
+        ) : (
         <form
           className="space-y-5"
           onSubmit={(e) => {
@@ -79,6 +102,7 @@ export function ProjectsPage() {
             <Plus /> Create project
           </Button>
         </form>
+        )}
       </Card>
 
       <div className="mb-4 flex items-baseline gap-2.5 px-0.5">
@@ -86,9 +110,6 @@ export function ProjectsPage() {
         <span className="text-[13px] text-muted">
           {projects.length} {projects.length === 1 ? "project" : "projects"}
         </span>
-        <Button size="sm" className="ml-auto" onClick={() => void importProject()}>
-          <Upload /> Import project
-        </Button>
       </div>
 
       {projects.length === 0 ? (
@@ -183,5 +204,35 @@ export function ProjectsPage() {
         </ul>
       )}
     </Page>
+  );
+}
+
+/** Takes an exported project file, dropped on it or picked with the file dialog. */
+function DropZone({ onFile, onBrowse }: { onFile: (data: string) => void; onBrowse: () => void }) {
+  const [over, setOver] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={onBrowse}
+      onDragOver={(e) => {
+        e.preventDefault();
+        setOver(true);
+      }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setOver(false);
+        const file = e.dataTransfer.files[0];
+        if (file) void file.text().then(onFile);
+      }}
+      className={clsx(
+        "flex w-full flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed px-6 py-12 text-center transition-colors",
+        over ? "border-accent bg-accent-soft" : "border-line hover:border-accent/50",
+      )}
+    >
+      <FileUp className="size-7 text-accent" />
+      <span className="text-[15px] font-semibold text-ink">Drop a project file here</span>
+      <span className="text-[13px] text-ink-2">or click to choose one · .json exported from Finanz analyzer</span>
+    </button>
   );
 }

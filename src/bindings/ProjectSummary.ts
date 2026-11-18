@@ -2,4 +2,4 @@
 import type { Currency } from "./Currency";
 import type { ProjectTemplate } from "./ProjectTemplate";
 
-export type ProjectSummary = { id: string, name: string, client: string, template: ProjectTemplate, currency: Currency, updated_at: string, };
+export type ProjectSummary = { id: string, name: string, folder: string, client: string, template: ProjectTemplate, currency: Currency, updated_at: string, };

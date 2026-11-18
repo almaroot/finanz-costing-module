@@ -151,11 +151,32 @@ async fn import_project(app: tauri::AppHandle, db: State<'_, Db>) -> Result<Opti
         return Ok(None);
     };
     let data = std::fs::read_to_string(picked.into_path().map_err(db::err)?).map_err(db::err)?;
+    import_project_data(db, data).map(Some)
+}
+
+/// Adds a project from the text of an exported file, e.g. one dropped on the window.
+#[tauri::command]
+fn import_project_data(db: State<'_, Db>, data: String) -> Result<Project, String> {
     let mut project = db::parse_project(&data).map_err(|e| format!("Not a project file: {e}"))?;
     project.id = new_id();
     project.updated_at = now();
     db.upsert_project(&project)?;
-    Ok(Some(project))
+    Ok(project)
+}
+
+/// Moves a project into a sidebar folder, or out of any with an empty name.
+#[tauri::command]
+fn set_project_folder(db: State<'_, Db>, id: String, folder: String) -> Result<(), String> {
+    let mut project = db.get_project(&id)?;
+    project.folder = folder.trim().to_string();
+    db.upsert_project(&project)
+}
+
+#[tauri::command]
+fn rename_project(db: State<'_, Db>, id: String, name: String) -> Result<(), String> {
+    let mut project = db.get_project(&id)?;
+    project.name = name.trim().to_string();
+    db.upsert_project(&project)
 }
 
 #[tauri::command]
@@ -290,6 +311,9 @@ pub fn run() {
             default_catalogue,
             export_excel,
             import_project,
+            import_project_data,
+            set_project_folder,
+            rename_project,
             plan,
             switch_template,
             has_api_key,

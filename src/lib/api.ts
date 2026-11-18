@@ -20,6 +20,8 @@ export const api = {
   switchTemplate: (project: Project, template: ProjectTemplate) =>
     invoke<Project>("switch_template", { project, template }),
   duplicateProject: (id: string) => invoke<Project>("duplicate_project", { id }),
+  renameProject: (id: string, name: string) => invoke<void>("rename_project", { id, name }),
+  setProjectFolder: (id: string, folder: string) => invoke<void>("set_project_folder", { id, folder }),
   deleteProject: (id: string) => invoke<void>("delete_project", { id }),
   exportProject: (id: string) => invoke<string | null>("export_project", { id }),
   exportExcel: (id: string) => invoke<string | null>("export_excel", { id }),
@@ -28,6 +30,7 @@ export const api = {
   defaultCatalogue: (template: ProjectTemplate) => invoke<OnboardingItem[]>("default_catalogue", { template }),
   printPage: () => invoke<void>("print_page"),
   importProject: () => invoke<Project | null>("import_project"),
+  importProjectData: (data: string) => invoke<Project>("import_project_data", { data }),
   plan: (project: Project) => invoke<ProjectResult>("plan", { project }),
   hasApiKey: () => invoke<boolean>("has_api_key"),
   listLocalModels: () => invoke<string[]>("list_local_models"),

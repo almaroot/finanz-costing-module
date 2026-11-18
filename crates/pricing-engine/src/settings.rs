@@ -50,6 +50,9 @@ pub struct AppSettings {
     /// Platform and services lists saved by name, to import into another project.
     #[serde(default)]
     pub cost_templates: Vec<CostTemplate>,
+    /// Sidebar folder name → colour token (e.g. "cat-3").
+    #[serde(default)]
+    pub folder_colors: std::collections::BTreeMap<String, String>,
 }
 
 /// A saved list of platform costs. It only imports into projects of the
@@ -77,6 +80,7 @@ impl Default for AppSettings {
             local_url: default_local_url(),
             local_model: String::new(),
             cost_templates: Vec::new(),
+            folder_colors: Default::default(),
         }
     }
 }

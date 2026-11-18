@@ -29,4 +29,8 @@ plans: Array<Plan>,
 /**
  * Step 5 inputs and the last suggestion returned for them.
  */
-market: MarketContext, last_suggestion: AiSuggestion | null, created_at: string, updated_at: string, };
+market: MarketContext, last_suggestion: AiSuggestion | null, 
+/**
+ * The sidebar folder it sits in; empty for none.
+ */
+folder: string, created_at: string, updated_at: string, };

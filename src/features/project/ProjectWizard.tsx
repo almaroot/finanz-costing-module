@@ -6,6 +6,7 @@ import {
   ChevronsDownUp,
   ChevronsUpDown,
   CircleCheck,
+  Download,
   FileText,
   LoaderCircle,
   Plus,
@@ -105,6 +106,10 @@ export function ProjectWizard() {
               <Button size="sm" onClick={() => setReportOpen(true)}>
                 <FileText />
                 Report
+              </Button>
+              <Button size="sm" onClick={() => void useApp.getState().exportProject(project.id)}>
+                <Download />
+                Export
               </Button>
               <Button
                 size="sm"
