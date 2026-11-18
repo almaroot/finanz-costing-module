@@ -95,31 +95,46 @@ fn print_page(window: tauri::WebviewWindow) -> Result<(), String> {
     window.print().map_err(|e| e.to_string())
 }
 
-/// Writes the project to the Downloads folder as a file another copy of the app can import.
+/// Saves the project where you choose, as a file another copy of the app can import.
+/// `None` when the dialog is cancelled. Async, so the dialog doesn't block the main thread.
 #[tauri::command]
-fn export_project(app: tauri::AppHandle, db: State<'_, Db>, id: String) -> Result<String, String> {
+async fn export_project(app: tauri::AppHandle, db: State<'_, Db>, id: String) -> Result<Option<String>, String> {
     let project = db.get_project(&id)?;
     let data = serde_json::to_string_pretty(&project).map_err(db::err)?;
-    save_download(&app, &project.name, "finanz.json", data.as_bytes())
+    save_as(&app, &project.name, "finanz.json", ("Finanz project", "json"), data.as_bytes())
 }
 
-/// Writes the project, its prices and its scenarios to the Downloads folder as an Excel workbook.
+/// Saves the project, its prices and its scenarios where you choose, as an Excel workbook.
 #[tauri::command]
-fn export_excel(app: tauri::AppHandle, db: State<'_, Db>, id: String) -> Result<String, String> {
+async fn export_excel(app: tauri::AppHandle, db: State<'_, Db>, id: String) -> Result<Option<String>, String> {
     let project = db.get_project(&id)?;
     let data = excel::workbook(&project, &plan_project(&project)).map_err(db::err)?;
-    save_download(&app, &project.name, "xlsx", &data)
+    save_as(&app, &project.name, "xlsx", ("Excel workbook", "xlsx"), &data)
 }
 
-/// Saves `data` as `<name>.<ext>` in Downloads and returns the full path.
-fn save_download(app: &tauri::AppHandle, name: &str, ext: &str, data: &[u8]) -> Result<String, String> {
+/// Asks where to save `<name>.<ext>`, starting in Downloads, writes `data` there and returns the path.
+fn save_as(
+    app: &tauri::AppHandle,
+    name: &str,
+    ext: &str,
+    (kind, filter): (&str, &str),
+    data: &[u8],
+) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
     let name: String = name
         .chars()
         .map(|c| if c.is_alphanumeric() || c == ' ' || c == '-' { c } else { '_' })
         .collect();
-    let path = app.path().download_dir().map_err(db::err)?.join(format!("{}.{ext}", name.trim()));
+    let mut dialog = app.dialog().file().set_file_name(format!("{}.{ext}", name.trim())).add_filter(kind, &[filter]);
+    if let Ok(downloads) = app.path().download_dir() {
+        dialog = dialog.set_directory(downloads);
+    }
+    let Some(picked) = dialog.blocking_save_file() else {
+        return Ok(None);
+    };
+    let path = picked.into_path().map_err(db::err)?;
     std::fs::write(&path, data).map_err(db::err)?;
-    Ok(path.display().to_string())
+    Ok(Some(path.display().to_string()))
 }
 
 /// Adds an exported project as a new one, so importing twice never overwrites anything.
@@ -237,6 +252,7 @@ async fn refresh_rates(db: State<'_, Db>) -> Result<ExchangeRates, String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             // Settings updates the app in place and restarts it, so no installer
             // is ever downloaded by hand.

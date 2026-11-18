@@ -211,7 +211,8 @@ export const useApp = create<AppState>((set, get) => {
     async exportProject(id) {
       await flushSave();
       try {
-        return await api.exportProject(id);
+        // null when the save dialog is cancelled.
+        return (await api.exportProject(id)) ?? undefined;
       } catch (e) {
         set({ error: errorMessage(e) });
       }
@@ -220,7 +221,8 @@ export const useApp = create<AppState>((set, get) => {
     async exportExcel(id) {
       await flushSave();
       try {
-        return await api.exportExcel(id);
+        // null when the save dialog is cancelled.
+        return (await api.exportExcel(id)) ?? undefined;
       } catch (e) {
         set({ error: errorMessage(e) });
       }

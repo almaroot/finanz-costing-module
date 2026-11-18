@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import { Check, ChevronDown, Plus, TriangleAlert, X } from "lucide-react";
+import { Check, ChevronDown, Copy, Plus, TriangleAlert, X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import type { Band } from "../../bindings/Band";
 import type { BandResult } from "../../bindings/BandResult";
@@ -47,25 +47,18 @@ export function StepScenarios({ project, result, money }: { project: Project; re
   const setBand = (id: string, patch: Partial<Band>) =>
     updateProject((p) => ({ ...p, bands: p.bands.map((b) => (b.id === id ? { ...b, ...patch } : b)) }));
 
-  const addBand = () => {
+  // A copy of the open band, right after it: buildings, price, discount and extras, to change only what differs.
+  const duplicateBand = () => {
     updateProject((p) => {
-      const last = p.bands[p.bands.length - 1];
-      return {
-        ...p,
-        bands: [
-          ...p.bands,
-          {
-            id: crypto.randomUUID(),
-            buildings: last ? Math.max(1, last.buildings) * 2 : 1,
-            price: last?.price ?? null,
-            discount: last?.discount ?? 0,
-            // A new band starts from the previous one, so you don't re-tick everything.
-            onboarding: [...(last?.onboarding ?? defaultSelection(p.onboarding))],
-          },
-        ],
-      };
+      const source = p.bands[current];
+      const copy: Band = source
+        ? { ...source, id: crypto.randomUUID(), onboarding: [...source.onboarding] }
+        : { id: crypto.randomUUID(), buildings: 1, price: null, discount: 0, onboarding: defaultSelection(p.onboarding) };
+      const bands = [...p.bands];
+      bands.splice(current + 1, 0, copy);
+      return { ...p, bands };
     });
-    setActive(project.bands.length);
+    setActive(current + 1);
   };
 
   const removeBand = (id: string, index: number) => {
@@ -207,10 +200,10 @@ export function StepScenarios({ project, result, money }: { project: Project; re
           })}
           <button
             type="button"
-            onClick={addBand}
+            onClick={duplicateBand}
             className="mb-2 ml-2 flex items-center gap-1.5 rounded-[9px] border border-dashed border-ink-2/30 px-[11px] py-[7px] text-[13px] font-medium whitespace-nowrap text-ink-2 hover:border-accent/50 hover:text-accent-ink [&_svg]:size-3"
           >
-            <Plus /> Add band
+            <Copy /> {project.bands.length ? `Duplicate band ${current + 1}` : "Add band"}
           </button>
         </div>
 
