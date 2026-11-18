@@ -212,9 +212,9 @@ function StepCosts({ project }: { project: Project }) {
     void api.defaultCosts().then(setDefaults);
   }, []);
   const originals = new Map(defaults.map((c) => [c.id, c.monthly]));
-  const sharedMonthly = project.structure.shared
+  const platformMonthly = project.structure.shared
     .filter((c) => !c.removed)
-    .reduce((sum, c) => sum + Math.max(c.monthly, 0) * Math.min(Math.max(c.share, 0), 1), 0);
+    .reduce((sum, c) => sum + Math.max(c.monthly, 0), 0);
   const updateProject = useApp((s) => s.updateProject);
   const structure = project.structure;
   const setStructure = (patch: Partial<Project["structure"]>) =>
@@ -348,7 +348,7 @@ function StepCosts({ project }: { project: Project }) {
             </Button>
           ))
         }
-        description={`What running the platform costs you, per month. Charged at cost, with no margin, for the share this client pays — so one client can cover most of a service and another none of it. ${
+        description={`What running the platform costs you, per month. How much of each service this client pays is set in step 3. ${
           project.template === "contractors"
             ? "Each plan splits it between its users."
             : "Shared by the buildings of each scenario."
@@ -395,13 +395,13 @@ function StepCosts({ project }: { project: Project }) {
               <Plus /> Custom service
             </Button>
           </div>
-          {/* What this client pays for the platform: each service's share, deleted ones left out. */}
+          {/* What the platform costs, deleted services left out. How much of it this client pays is set in Pricing. */}
           <div className="flex justify-end gap-2 text-sm">
-            <span className="text-ink-2">Total client pays</span>
+            <span className="text-ink-2">Total</span>
             <span className="font-semibold tabular-nums text-bad">
-              {fmtMoney(sharedMonthly, project.currency)} / month
+              {fmtMoney(platformMonthly, project.currency)} / month
             </span>
-            <span className="tabular-nums text-muted">· {fmtMoney(sharedMonthly * 12, project.currency)} / year</span>
+            <span className="tabular-nums text-muted">· {fmtMoney(platformMonthly * 12, project.currency)} / year</span>
           </div>
         </div>
       </Card>
@@ -569,7 +569,7 @@ function SharedCostRow({
   return (
     <div
       className={clsx(
-        "grid grid-cols-2 items-end gap-3 rounded-lg border border-line p-3 md:grid-cols-[4fr_2fr_2fr_2fr_7rem]",
+        "grid grid-cols-2 items-end gap-3 rounded-lg border border-line p-3 md:grid-cols-[4fr_2fr_7rem]",
         cost.removed && "bg-surface-2",
       )}
     >
@@ -602,24 +602,6 @@ function SharedCostRow({
             </button>
           )}
         </div>
-        <Field label="Client pays">
-          <NumberField
-            value={cost.share}
-            min={0}
-            scale={100}
-            suffix="%"
-            onChange={(v) => onChange({ share: Math.min(v, 1) })}
-          />
-        </Field>
-        <Field label="Client pays / month">
-          <NumberField
-            value={cost.monthly * cost.share}
-            min={0}
-            decimals={2}
-            suffix={currency}
-            onChange={(v) => cost.monthly > 0 && onChange({ share: Math.min(v / cost.monthly, 1) })}
-          />
-        </Field>
       </div>
       <div className="col-span-2 text-right md:col-span-1">
         {cost.removed ? (
@@ -732,6 +714,14 @@ function StepPricing({
       onboarding: p.onboarding.map((i) => (i.id === id ? { ...i, price } : i)),
     }));
 
+  const shared = project.structure.shared.filter((c) => !c.removed);
+  const clientMonthly = shared.reduce((sum, c) => sum + Math.max(c.monthly, 0) * Math.min(Math.max(c.share, 0), 1), 0);
+  const setShare = (id: string, share: number) =>
+    updateProject((p) => ({
+      ...p,
+      structure: { ...p.structure, shared: p.structure.shared.map((c) => (c.id === id ? { ...c, share } : c)) },
+    }));
+
   const extras = offered(project.onboarding);
   // Same cards, in the same order, as step 2.
   const categories: string[] = [];
@@ -773,6 +763,53 @@ function StepPricing({
           </p>
         )}
       </Card>
+
+      {shared.length > 0 && (
+        <Card
+          title="What the client pays of each service"
+          description="Charged at cost, with no margin, for the share this client pays — so one client can cover most of a service and another none of it."
+        >
+          <div className="space-y-2">
+            {shared.map((cost) => (
+              <div
+                key={cost.id}
+                className="grid grid-cols-2 items-end gap-3 rounded-lg border border-line p-3 md:grid-cols-[4fr_2fr_2fr_2fr]"
+              >
+                <div className="col-span-2 min-w-0 md:col-span-1">
+                  <div className="truncate text-sm text-ink">{cost.name || "Unnamed service"}</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-xs text-muted">Cost / month</div>
+                  <div className="text-sm tabular-nums text-bad">{money(cost.monthly)}</div>
+                </div>
+                <Field label="Client pays">
+                  <NumberField
+                    value={cost.share}
+                    min={0}
+                    scale={100}
+                    suffix="%"
+                    onChange={(v) => setShare(cost.id, Math.min(v, 1))}
+                  />
+                </Field>
+                <Field label="Client pays / month">
+                  <NumberField
+                    value={cost.monthly * cost.share}
+                    min={0}
+                    decimals={2}
+                    suffix={project.currency}
+                    onChange={(v) => cost.monthly > 0 && setShare(cost.id, Math.min(v / cost.monthly, 1))}
+                  />
+                </Field>
+              </div>
+            ))}
+            <div className="flex justify-end gap-2 pt-2 text-sm">
+              <span className="text-ink-2">Total client pays</span>
+              <span className="font-semibold tabular-nums text-bad">{money(clientMonthly)} / month</span>
+              <span className="tabular-nums text-muted">· {money(clientMonthly * 12)} / year</span>
+            </div>
+          </div>
+        </Card>
+      )}
 
       {extras.length === 0 ? (
         <Card title="Onboarding">
